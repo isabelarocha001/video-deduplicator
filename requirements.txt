@@ -1,0 +1,5 @@
+# Runtime dependencies (none beyond the standard library)
+# FFmpeg must be installed on the system separately.
+
+# Development / test dependencies
+pytest>=7.0.0
