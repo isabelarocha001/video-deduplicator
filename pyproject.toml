@@ -24,7 +24,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Multimedia :: Video",
 ]
-dependencies = []
+dependencies = ["fastapi>=0.110.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0.0"]
@@ -48,5 +48,4 @@ pythonpath = ["."]
 
 
 [tool.vercel]
-# HTTP entrypoint for Vercel Python runtime
-entrypoint = "api/index.py"
+entrypoint = "api.index:app"
