@@ -9,123 +9,119 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="/js/supabase-config.js"></script>
 </head>
 <body>
-  <!-- Top nav -->
+  <!-- Auth modal -->
+  <div class="modal" id="authModal" hidden>
+    <div class="modal-card">
+      <h2 id="authTitle">Entrar</h2>
+      <p class="modal-sub">Rede social Lux · conectada ao Supabase</p>
+      <form id="authForm">
+        <label class="field">
+          <span>E-mail</span>
+          <input type="email" id="authEmail" required autocomplete="email" placeholder="voce@email.com" />
+        </label>
+        <label class="field">
+          <span>Senha</span>
+          <input type="password" id="authPassword" required minlength="6" autocomplete="current-password" placeholder="mín. 6 caracteres" />
+        </label>
+        <label class="field" id="authUsernameField" hidden>
+          <span>Nome de usuário</span>
+          <input type="text" id="authUsername" minlength="3" maxlength="30" pattern="[a-zA-Z0-9._]+" placeholder="seu_user" />
+        </label>
+        <p class="form-error" id="authError" hidden></p>
+        <button type="submit" class="btn btn-primary btn-block" id="authSubmit">Entrar</button>
+      </form>
+      <button type="button" class="link-btn" id="authSwitch">Criar conta</button>
+    </div>
+  </div>
+
+  <!-- Upload modal -->
+  <div class="modal" id="uploadModal" hidden>
+    <div class="modal-card">
+      <h2>Nova publicação</h2>
+      <form id="uploadForm">
+        <label class="upload-drop" id="uploadDrop">
+          <input type="file" id="uploadFile" accept="image/*,video/mp4,video/webm" hidden />
+          <span id="uploadHint">Toque para escolher foto ou vídeo</span>
+          <img id="uploadPreview" alt="" hidden />
+        </label>
+        <label class="field">
+          <span>Legenda</span>
+          <textarea id="uploadCaption" rows="3" maxlength="500" placeholder="Escreva uma legenda..."></textarea>
+        </label>
+        <p class="form-error" id="uploadError" hidden></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" id="uploadCancel">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="uploadSubmit">Publicar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <header class="topbar">
     <div class="topbar-inner">
-      <a href="/" class="logo" aria-label="Início">Lux</a>
+      <a href="/" class="logo">Lux</a>
       <div class="topbar-actions">
-        <button type="button" class="icon-btn" id="themeToggle" title="Alternar tema" aria-label="Alternar tema claro/escuro">
-          <span class="icon-sun" aria-hidden="true">☀</span>
-          <span class="icon-moon" aria-hidden="true">☾</span>
+        <button type="button" class="icon-btn" id="themeToggle" title="Tema" aria-label="Alternar tema">
+          <span class="icon-sun">☀</span><span class="icon-moon">☾</span>
         </button>
-        <button type="button" class="icon-btn" title="Notificações" aria-label="Notificações">♡</button>
-        <button type="button" class="icon-btn" title="Mensagens" aria-label="Mensagens">✉</button>
+        <button type="button" class="icon-btn" id="btnOpenUpload" title="Criar" aria-label="Criar" hidden>＋</button>
+        <button type="button" class="icon-btn" id="btnAuth" title="Conta">👤</button>
       </div>
     </div>
   </header>
 
   <main class="page">
-    <!-- Profile header -->
-    <section class="profile" aria-label="Perfil">
+    <section class="profile" id="profileSection" aria-label="Perfil">
       <div class="profile-avatar-wrap">
         <div class="profile-avatar">
-          <img
-            id="avatarImg"
-            src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&h=400&fit=crop&crop=face"
-            alt="Foto de perfil de Sofia Rivera"
-            width="150"
-            height="150"
-          />
+          <img id="avatarImg" src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&h=400&fit=crop&crop=face" alt="Avatar" width="150" height="150" />
         </div>
-        <button type="button" class="avatar-story-ring" title="Ver stories" aria-label="Stories"></button>
+        <span class="avatar-story-ring" aria-hidden="true"></span>
       </div>
-
       <div class="profile-info">
         <div class="profile-title-row">
-          <h1 class="profile-username">sofiarivera</h1>
-          <div class="profile-actions">
-            <button type="button" class="btn btn-primary" id="btnFollow">Seguir</button>
-            <button type="button" class="btn btn-secondary">Mensagem</button>
-            <button type="button" class="btn btn-icon" title="Mais opções" aria-label="Mais">▾</button>
+          <h1 class="profile-username" id="profileUsername">carregando…</h1>
+          <div class="profile-actions" id="profileActions">
+            <button type="button" class="btn btn-primary" id="btnFollow" hidden>Seguir</button>
+            <button type="button" class="btn btn-secondary" id="btnLogout" hidden>Sair</button>
           </div>
         </div>
-
         <ul class="profile-stats" role="list">
-          <li><strong>128</strong> publicações</li>
-          <li><button type="button" class="stat-link"><strong>24,8 mil</strong> seguidores</button></li>
-          <li><button type="button" class="stat-link"><strong>312</strong> seguindo</button></li>
+          <li><strong id="statPosts">0</strong> publicações</li>
+          <li><strong>—</strong> seguidores</li>
+          <li><strong>—</strong> seguindo</li>
         </ul>
-
         <div class="profile-bio">
-          <p class="profile-name">Sofia Rivera</p>
-          <p class="profile-text">
-            Criadora de conteúdo · lifestyle &amp; viagens<br />
-            📍 São Paulo<br />
-            <a href="#" class="bio-link">linktr.ee/sofiarivera</a>
-          </p>
+          <p class="profile-name" id="profileDisplayName"></p>
+          <p class="profile-text" id="profileBio">Entre para publicar e ver o feed real.</p>
         </div>
       </div>
     </section>
 
-    <!-- Highlights -->
-    <section class="highlights" aria-label="Destaques">
-      <button type="button" class="highlight">
-        <span class="highlight-circle"><img src="https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=120&h=120&fit=crop" alt="" /></span>
-        <span class="highlight-label">Viagens</span>
-      </button>
-      <button type="button" class="highlight">
-        <span class="highlight-circle"><img src="https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=120&h=120&fit=crop" alt="" /></span>
-        <span class="highlight-label">Looks</span>
-      </button>
-      <button type="button" class="highlight">
-        <span class="highlight-circle"><img src="https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=120&h=120&fit=crop" alt="" /></span>
-        <span class="highlight-label">Café</span>
-      </button>
-      <button type="button" class="highlight highlight-new">
-        <span class="highlight-circle highlight-plus">+</span>
-        <span class="highlight-label">Novo</span>
-      </button>
-    </section>
+    <section class="highlights" id="highlights" hidden></section>
 
-    <!-- Tabs -->
-    <nav class="tabs" role="tablist" aria-label="Conteúdo do perfil">
-      <button type="button" class="tab is-active" role="tab" aria-selected="true" data-tab="posts">▦ Publicações</button>
-      <button type="button" class="tab" role="tab" aria-selected="false" data-tab="reels">▶ Reels</button>
-      <button type="button" class="tab" role="tab" aria-selected="false" data-tab="tagged">👤 Marcadas</button>
+    <nav class="tabs" role="tablist">
+      <button type="button" class="tab is-active" data-tab="posts">▦ Publicações</button>
+      <button type="button" class="tab" data-tab="feed">◎ Feed</button>
     </nav>
 
-    <!-- Posts grid -->
-    <section class="grid" id="postsGrid" aria-label="Publicações">
-      <!-- filled by JS -->
-    </section>
+    <section class="grid" id="postsGrid" aria-label="Publicações"></section>
+    <p class="empty-state" id="emptyState" hidden>Nenhuma publicação ainda. Seja o primeiro!</p>
   </main>
 
-  <!-- Bottom nav (mobile) -->
-  <nav class="bottom-nav" aria-label="Navegação principal">
-    <a href="/" class="nav-item is-active" aria-current="page">
-      <span class="nav-icon">⌂</span>
-      <span class="nav-label">Início</span>
-    </a>
-    <button type="button" class="nav-item">
-      <span class="nav-icon">⌕</span>
-      <span class="nav-label">Buscar</span>
-    </button>
-    <button type="button" class="nav-item nav-create">
-      <span class="nav-icon">＋</span>
-      <span class="nav-label">Criar</span>
-    </button>
-    <button type="button" class="nav-item">
-      <span class="nav-icon">▶</span>
-      <span class="nav-label">Reels</span>
-    </button>
-    <a href="/" class="nav-item">
-      <span class="nav-avatar">
-        <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=80&h=80&fit=crop&crop=face" alt="Seu perfil" />
-      </span>
+  <nav class="bottom-nav" aria-label="Navegação">
+    <a href="/" class="nav-item is-active"><span class="nav-icon">⌂</span><span class="nav-label">Início</span></a>
+    <button type="button" class="nav-item" id="navSearch"><span class="nav-icon">⌕</span><span class="nav-label">Buscar</span></button>
+    <button type="button" class="nav-item nav-create" id="navCreate"><span class="nav-icon">＋</span><span class="nav-label">Criar</span></button>
+    <button type="button" class="nav-item" id="navReels"><span class="nav-icon">▶</span><span class="nav-label">Reels</span></button>
+    <button type="button" class="nav-item" id="navProfile">
+      <span class="nav-avatar"><img id="navAvatar" src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=80&h=80&fit=crop&crop=face" alt="" /></span>
       <span class="nav-label">Perfil</span>
-    </a>
+    </button>
   </nav>
 
   <script src="/js/app.js"></script>
