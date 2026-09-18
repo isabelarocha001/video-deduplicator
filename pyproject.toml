@@ -28,14 +28,25 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0.0"]
+duplicate-redteam = [
+    "Pillow>=9.0.0",
+    "imagehash>=4.3.0",
+    "numpy>=1.22.0",
+    "supabase>=2.0.0",
+]
 
 [project.scripts]
 video-deduplicator = "app.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["app*"]
+include = ["app*", "tools*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+
+[tool.vercel]
+# HTTP entrypoint for Vercel Python runtime
+entrypoint = "api/index.py"

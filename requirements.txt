@@ -1,5 +1,13 @@
-# Runtime dependencies (none beyond the standard library)
+# Runtime dependencies
 # FFmpeg must be installed on the system separately.
 
 # Development / test dependencies
 pytest>=7.0.0
+
+# Duplicate red-team laboratory (tools/duplicate_redteam)
+Pillow>=9.0.0
+imagehash>=4.3.0
+numpy>=1.22.0
+
+# Optional: real Supabase integration for red-team (service_role only)
+supabase>=2.0.0

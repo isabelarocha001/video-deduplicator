@@ -59,3 +59,11 @@ output/*
 *.mov
 *.webm
 *.log
+
+# Red-team laboratory artifacts
+tools/duplicate_redteam/results/
+*.pyc
+__pycache__/
+.venv/
+node_modules/
+node_modules/
