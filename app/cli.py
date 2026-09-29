@@ -20,6 +20,12 @@ from app.processor import (
     ProcessingError,
     process_video,
 )
+from app.rendi import (
+    RendiConfigError,
+    RendiError,
+    is_configured as rendi_configured,
+    process_via_rendi,
+)
 from app.supabase_media import (
     SupabaseConfigError,
     SupabaseMediaError,
@@ -64,6 +70,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     process_parser.add_argument("--trim-start", type=float, default=None, metavar="SECS", help="Corta N segundos do início.")
     process_parser.add_argument("--trim-end", type=float, default=None, metavar="SECS", help="Corta N segundos do final.")
+    process_parser.add_argument(
+        "--rendi",
+        action="store_true",
+        default=False,
+        help="Processa via Rendi.dev (FFmpeg na nuvem). Requer RENDI_API_KEY e input já em URL pública ou --upload-cdn antes.",
+    )
+    process_parser.add_argument(
+        "--rendi-input-url",
+        type=str,
+        default=None,
+        help="URL pública do vídeo de entrada para o Rendi (obrigatório com --rendi se não usar upload prévio).",
+    )
     process_parser.add_argument(
         "--upload-cdn",
         action="store_true",
@@ -210,21 +228,44 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "process":
         try:
-            result = process_video(
-                input_path=args.input,
-                output_path=args.output,
-                remove_metadata=args.remove_metadata,
-                crop=args.crop,
-                width=args.width,
-                height=args.height,
-                preserve_aspect=args.preserve_aspect,
-                crf=args.crf,
-                preset=args.preset,
-                subtle=args.subtle,
-                trim_start=args.trim_start,
-                trim_end=args.trim_end,
-            )
-            print(f"✓ Processamento concluído: {result}")
+            if getattr(args, "rendi", False):
+                input_url = getattr(args, "rendi_input_url", None)
+                # If no URL, upload original to CDN first to get public URL
+                if not input_url:
+                    remote = default_remote_path(args.input, prefix="rendi-in")
+                    input_url = _do_upload(args.input, remote)
+                    print(f"✓ Input no CDN para Rendi: {input_url}")
+                rendi_res = process_via_rendi(
+                    input_url.split("?")[0],
+                    output_path=args.output,
+                    subtle=args.subtle,
+                    remove_metadata=args.remove_metadata,
+                    trim_start=args.trim_start,
+                    trim_end=args.trim_end,
+                    crf=args.crf,
+                    preset=args.preset,
+                    download=True,
+                )
+                result = rendi_res.local_path or args.output
+                print(f"✓ Rendi OK command_id={rendi_res.command_id}")
+                print(f"  output_url: {rendi_res.output_url}")
+                print(f"✓ Processamento concluído: {result}")
+            else:
+                result = process_video(
+                    input_path=args.input,
+                    output_path=args.output,
+                    remove_metadata=args.remove_metadata,
+                    crop=args.crop,
+                    width=args.width,
+                    height=args.height,
+                    preserve_aspect=args.preserve_aspect,
+                    crf=args.crf,
+                    preset=args.preset,
+                    subtle=args.subtle,
+                    trim_start=args.trim_start,
+                    trim_end=args.trim_end,
+                )
+                print(f"✓ Processamento concluído: {result}")
 
             if args.upload_cdn:
                 remote = args.cdn_remote_path or default_remote_path(

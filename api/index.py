@@ -60,6 +60,7 @@ def health():
         "status": "healthy",
         "service": "video-deduplicator",
         "ffmpeg": bool(ffmpeg),
+        "rendi_configured": bool(os.environ.get("RENDI_API_KEY")),
         "bunny_configured": bool(os.environ.get("BUNNY_STORAGE_ZONE") and os.environ.get("BUNNY_STORAGE_API_KEY")),
         "supabase_configured": bool(os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY")),
     }
@@ -148,8 +149,8 @@ async def process_endpoint(
     preset: str = Form("medium"),
 ):
     """Process video with FFmpeg (requires ffmpeg on the host)."""
-    if not shutil.which("ffmpeg"):
-        return _json_error(503, "FFmpeg não disponível neste host")
+    if not shutil.which("ffmpeg") and not os.environ.get("RENDI_API_KEY"):
+        return _json_error(503, "FFmpeg local e RENDI_API_KEY indisponíveis")
 
     from app.processor import InputValidationError, ProcessingError, process_video
 
@@ -257,8 +258,14 @@ async def process_and_publish(
     from app.processor import InputValidationError, ProcessingError, process_video
     from app.supabase_media import SupabaseConfigError, SupabaseMediaError, register_media
 
-    if not shutil.which("ffmpeg"):
-        return _json_error(503, "FFmpeg não disponível neste host — use /api/upload-cdn com arquivo já processado")
+    use_rendi = bool(os.environ.get("RENDI_API_KEY")) and (
+        not shutil.which("ffmpeg") or os.environ.get("FORCE_RENDI") == "1"
+    )
+    if not shutil.which("ffmpeg") and not os.environ.get("RENDI_API_KEY"):
+        return _json_error(
+            503,
+            "FFmpeg local e RENDI_API_KEY indisponíveis — configure um dos dois",
+        )
 
     tmp = Path(tempfile.mkdtemp(prefix="vd-pub-"))
     try:
@@ -266,19 +273,45 @@ async def process_and_publish(
         out = tmp / "out" / f"{src.stem}_processed.mp4"
         out.parent.mkdir(parents=True, exist_ok=True)
 
-        try:
-            process_video(
-                src,
-                out,
-                remove_metadata=remove_metadata,
-                subtle=subtle,
-                trim_start=trim_start,
-                trim_end=trim_end,
-                crf=crf,
-                preset=preset,
-            )
-        except (InputValidationError, ProcessingError) as exc:
-            return _json_error(400, f"process: {exc}")
+        if use_rendi:
+            from app.cdn import default_remote_path as _drp, load_bunny_config as _lbc, upload_file as _up
+            from app.rendi import RendiError, process_via_rendi
+
+            # Input must be a public URL for Rendi
+            try:
+                cfg = _lbc()
+                in_remote = _drp(src, prefix="rendi-in")
+                in_url = _up(src, in_remote, config=cfg)
+            except Exception as exc:
+                return _json_error(400, f"cdn input for rendi: {exc}")
+            try:
+                rendi_res = process_via_rendi(
+                    in_url.split("?")[0],
+                    output_path=out,
+                    subtle=subtle,
+                    remove_metadata=remove_metadata,
+                    trim_start=trim_start,
+                    trim_end=trim_end,
+                    crf=crf,
+                    preset=preset,
+                    download=True,
+                )
+            except RendiError as exc:
+                return _json_error(400, f"rendi: {exc}")
+        else:
+            try:
+                process_video(
+                    src,
+                    out,
+                    remove_metadata=remove_metadata,
+                    subtle=subtle,
+                    trim_start=trim_start,
+                    trim_end=trim_end,
+                    crf=crf,
+                    preset=preset,
+                )
+            except (InputValidationError, ProcessingError) as exc:
+                return _json_error(400, f"process: {exc}")
 
         remote = default_remote_path(out, prefix=cdn_prefix)
         try:

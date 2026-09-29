@@ -291,3 +291,29 @@ uvicorn api.index:app --reload --port 8000
 
 Na Vercel, configure as mesmas variáveis de ambiente no painel do projeto. **FFmpeg** pode não estar disponível no serverless — nesse caso use `/api/upload-cdn` com arquivo já processado, ou rode o process localmente via CLI.
 
+
+
+## Rendi.dev (FFmpeg na nuvem)
+
+Quando não há FFmpeg local (ex.: Vercel), use [Rendi](https://www.rendi.dev/docs/introduction):
+
+```bash
+export RENDI_API_KEY=***
+# Bunny ainda é usado para URL pública de entrada + CDN final
+export BUNNY_STORAGE_ZONE=...
+export BUNNY_STORAGE_API_KEY=...
+export BUNNY_CDN_HOSTNAME=...
+
+python -m app.cli process \
+  -i video.mp4 -o out.mp4 \
+  --rendi --subtle \
+  --upload-cdn --register-supabase
+```
+
+Fluxo `--rendi`:
+1. Sobe o original para Bunny (URL pública)
+2. `POST /v1/run-ffmpeg-command` no Rendi
+3. Poll até `SUCCESS`
+4. Baixa o resultado e (opcional) reenvia ao CDN + `vd_media`
+
+`POST /api/process-and-publish` usa Rendi automaticamente se `RENDI_API_KEY` estiver setado e FFmpeg local ausente (ou `FORCE_RENDI=1`).
