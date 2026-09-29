@@ -197,3 +197,47 @@ video-deduplicator/
 ## Licença
 
 MIT
+
+
+## Bunny CDN
+
+Upload do arquivo processado para Bunny Storage e URL pública via Pull Zone.
+
+### Variáveis de ambiente
+
+```bash
+export BUNNY_STORAGE_ZONE=privsexv5
+export BUNNY_STORAGE_API_KEY="***"          # storage password
+export BUNNY_STORAGE_HOST=br.storage.bunnycdn.com
+export BUNNY_CDN_HOSTNAME=privsexcdnv5.b-cdn.net
+```
+
+Veja também `.env.example`.
+
+### Comandos
+
+Validar config (não imprime o secret completo):
+
+```bash
+python -m app.cli cdn-config
+```
+
+Processar + enviar para CDN:
+
+```bash
+python -m app.cli process \
+  --input input/video.mp4 \
+  --output output/video_limpo.mp4 \
+  --subtle \
+  --upload-cdn \
+  --cdn-prefix uploads
+```
+
+Só upload de arquivo já processado:
+
+```bash
+python -m app.cli upload-cdn \
+  --input output/video_limpo.mp4 \
+  --remote-path uploads/video_limpo.mp4
+```
+
