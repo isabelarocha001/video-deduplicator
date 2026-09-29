@@ -51,7 +51,13 @@
           <span>Legenda</span>
           <textarea id="uploadCaption" rows="3" maxlength="500" placeholder="Escreva uma legenda..."></textarea>
         </label>
+        <div class="field-row" style="display:flex;flex-direction:column;gap:8px;margin:12px 0">
+          <label class="check"><input type="checkbox" id="optSubtle" checked /> Processar (subtle + limpar metadados)</label>
+          <label class="check"><input type="checkbox" id="optRegister" checked /> Registrar no Supabase (vd_media)</label>
+          <label class="check"><input type="checkbox" id="optCdn" checked /> Enviar para Bunny CDN</label>
+        </div>
         <p class="form-error" id="uploadError" hidden></p>
+        <p class="form-status" id="uploadStatus" hidden style="font-size:13px;color:var(--text-muted)"></p>
         <div class="modal-actions">
           <button type="button" class="btn btn-secondary" id="uploadCancel">Cancelar</button>
           <button type="submit" class="btn btn-primary" id="uploadSubmit">Publicar</button>

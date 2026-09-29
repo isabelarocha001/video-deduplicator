@@ -259,3 +259,35 @@ python -m app.cli process \
   --caption "Meu vídeo"
 ```
 
+
+## API HTTP (frontend + Vercel)
+
+O backend FastAPI em `api/index.py` expõe:
+
+| Método | Rota | Função |
+|--------|------|--------|
+| GET | `/api/health` | Status (ffmpeg, bunny, supabase) |
+| GET | `/api/cdn-config` | Config CDN (sem secrets) |
+| GET | `/api/media` | Lista `vd_media` (feed) |
+| POST | `/api/process` | Processa vídeo (FFmpeg) |
+| POST | `/api/upload-cdn` | Upload Bunny (+ opcional Supabase) |
+| POST | `/api/process-and-publish` | Processa → CDN → registra |
+
+O frontend (`public/js/app.js`) carrega o feed via `/api/media` e publica pelo botão **＋** chamando `process-and-publish` ou `upload-cdn`.
+
+### Dev local
+
+```bash
+export SUPABASE_URL=...
+export SUPABASE_SERVICE_ROLE_KEY=...
+export BUNNY_STORAGE_ZONE=...
+export BUNNY_STORAGE_API_KEY=...
+export BUNNY_CDN_HOSTNAME=...
+
+pip install -r requirements.txt
+uvicorn api.index:app --reload --port 8000
+# abra http://127.0.0.1:8000
+```
+
+Na Vercel, configure as mesmas variáveis de ambiente no painel do projeto. **FFmpeg** pode não estar disponível no serverless — nesse caso use `/api/upload-cdn` com arquivo já processado, ou rode o process localmente via CLI.
+

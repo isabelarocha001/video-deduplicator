@@ -1,9 +1,14 @@
 /**
- * Lux social UI — offline / demo mode
- * (Supabase temporariamente indisponível: exceed_db_size_quota até ~12 out)
+ * Lux · video-deduplicator frontend
+ * Feed real via /api/media · publish via /api/process-and-publish ou /api/upload-cdn
  */
 (function () {
   const THEME_KEY = "lux-theme";
+  const API = "/api";
+
+  function $(id) {
+    return document.getElementById(id);
+  }
 
   function getPreferredTheme() {
     const saved = localStorage.getItem(THEME_KEY);
@@ -17,80 +22,231 @@
     localStorage.setItem(THEME_KEY, theme);
   }
   applyTheme(getPreferredTheme());
-  document.getElementById("themeToggle")?.addEventListener("click", () => {
+  $("themeToggle")?.addEventListener("click", () => {
     applyTheme(
       document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark"
     );
   });
 
-  // Demo profile
-  const profileUsername = document.getElementById("profileUsername");
-  const profileDisplayName = document.getElementById("profileDisplayName");
-  const profileBio = document.getElementById("profileBio");
-  const statPosts = document.getElementById("statPosts");
-
-  if (profileUsername) profileUsername.textContent = "sofiarivera";
-  if (profileDisplayName) profileDisplayName.textContent = "Sofia Rivera";
-  if (profileBio) {
-    profileBio.innerHTML =
-      "Criadora de conteúdo · lifestyle &amp; viagens<br />📍 São Paulo<br /><span class=\"bio-link\">Modo demo — Supabase volta após a cota</span>";
+  // Profile defaults
+  if ($("profileUsername")) $("profileUsername").textContent = "lux";
+  if ($("profileDisplayName")) $("profileDisplayName").textContent = "Lux · Video Deduplicator";
+  if ($("profileBio")) {
+    $("profileBio").innerHTML =
+      "Publique foto/vídeo · processa, sobe CDN e registra no Supabase<br /><span class=\"bio-link\">API /api/process-and-publish</span>";
   }
 
-  // Hide auth-only controls if present
-  ["btnOpenUpload", "btnLogout", "btnAuth", "authModal", "uploadModal"].forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) el.hidden = true;
-  });
-  const follow = document.getElementById("btnFollow");
-  if (follow) {
-    follow.hidden = false;
-    follow.addEventListener("click", () => {
-      const on = follow.classList.toggle("is-following");
-      follow.textContent = on ? "Seguindo" : "Seguir";
-    });
-  }
-
-  const POSTS = [
-    { src: "https://images.unsplash.com/photo-1515886657613-9f3515b0c78f?w=600&h=600&fit=crop", likes: "12,4 mil", comments: "218" },
-    { src: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=600&h=600&fit=crop", likes: "8.902", comments: "94" },
-    { src: "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=600&h=600&fit=crop", likes: "5.331", comments: "61" },
-    { src: "https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?w=600&h=600&fit=crop", likes: "19,1 mil", comments: "402" },
-    { src: "https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=600&h=600&fit=crop", likes: "7.120", comments: "88" },
-    { src: "https://images.unsplash.com/photo-1483985988355-763728e1935b?w=600&h=600&fit=crop", likes: "11,2 mil", comments: "156" },
-    { src: "https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=600&h=600&fit=crop", likes: "4.887", comments: "43" },
-    { src: "https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=600&h=600&fit=crop", likes: "9.014", comments: "112" },
-    { src: "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=600&h=600&fit=crop", likes: "15,6 mil", comments: "290" },
-  ];
-
-  const grid = document.getElementById("postsGrid");
-  const empty = document.getElementById("emptyState");
-  if (empty) empty.hidden = true;
-  if (statPosts) statPosts.textContent = String(POSTS.length);
-  if (grid) {
-    grid.innerHTML = POSTS.map(
-      (p) => `
-      <article class="grid-item">
-        <img src="${p.src}" alt="Publicação" loading="lazy" />
-        <div class="grid-meta">
-          <span>♥ ${p.likes}</span>
-          <span>💬 ${p.comments}</span>
-        </div>
-      </article>`
-    ).join("");
-  }
-
-  document.querySelectorAll(".tab").forEach((tab) => {
-    tab.addEventListener("click", () => {
-      document.querySelectorAll(".tab").forEach((t) => {
-        t.classList.toggle("is-active", t === tab);
-      });
-    });
+  // Show create controls
+  ["btnOpenUpload"].forEach((id) => {
+    const el = $(id);
+    if (el) el.hidden = false;
   });
 
-  // Create button → soft notice
-  function demoNotice() {
-    alert("Upload e login voltam quando a cota do Supabase liberar (por volta de 12 de outubro). Por enquanto é só o visual demo.");
+  // ── Feed ──────────────────────────────────────────────────────────────
+  async function loadFeed() {
+    const grid = $("postsGrid");
+    const empty = $("emptyState");
+    const stat = $("statPosts");
+    if (!grid) return;
+
+    grid.innerHTML = '<p class="empty-state">Carregando…</p>';
+    try {
+      const res = await fetch(`${API}/media?limit=48`);
+      const data = await res.json();
+      if (!data.ok) {
+        grid.innerHTML = "";
+        if (empty) {
+          empty.hidden = false;
+          empty.textContent = data.error || "Não foi possível carregar o feed.";
+        }
+        if (stat) stat.textContent = "0";
+        return;
+      }
+      const items = data.items || [];
+      if (stat) stat.textContent = String(items.length);
+      if (!items.length) {
+        grid.innerHTML = "";
+        if (empty) {
+          empty.hidden = false;
+          empty.textContent = "Nenhuma publicação ainda. Seja o primeiro!";
+        }
+        return;
+      }
+      if (empty) empty.hidden = true;
+      grid.innerHTML = items
+        .map((item) => {
+          const url = item.public_url || item.thumb_url || "";
+          const isVideo =
+            item.media_type === "video" ||
+            (item.mime_type || "").startsWith("video/") ||
+            /\.mp4($|\?)/i.test(url);
+          const media = isVideo
+            ? `<video src="${esc(url)}" muted playsinline preload="metadata"></video>`
+            : `<img src="${esc(url)}" alt="" loading="lazy" />`;
+          const caption = item.caption ? esc(item.caption) : "";
+          return `<article class="grid-item" data-id="${esc(item.id || "")}">
+            ${media}
+            <div class="grid-meta">
+              <span>${isVideo ? "▶ vídeo" : "♪"}</span>
+              <span>${caption}</span>
+            </div>
+          </article>`;
+        })
+        .join("");
+    } catch (err) {
+      grid.innerHTML = "";
+      if (empty) {
+        empty.hidden = false;
+        empty.textContent = "Erro de rede ao carregar feed.";
+      }
+      console.error(err);
+    }
   }
-  document.getElementById("navCreate")?.addEventListener("click", demoNotice);
-  document.getElementById("btnOpenUpload")?.addEventListener("click", demoNotice);
+
+  function esc(s) {
+    return String(s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  // ── Upload modal ──────────────────────────────────────────────────────
+  const modal = $("uploadModal");
+  const fileInput = $("uploadFile");
+  const hint = $("uploadHint");
+  const preview = $("uploadPreview");
+  const errEl = $("uploadError");
+  const statusEl = $("uploadStatus");
+
+  function openUpload() {
+    if (!modal) return;
+    modal.hidden = false;
+    if (errEl) {
+      errEl.hidden = true;
+      errEl.textContent = "";
+    }
+    if (statusEl) {
+      statusEl.hidden = true;
+      statusEl.textContent = "";
+    }
+  }
+  function closeUpload() {
+    if (modal) modal.hidden = true;
+    if (fileInput) fileInput.value = "";
+    if (preview) {
+      preview.hidden = true;
+      preview.removeAttribute("src");
+    }
+    if (hint) hint.hidden = false;
+  }
+
+  $("btnOpenUpload")?.addEventListener("click", openUpload);
+  $("navCreate")?.addEventListener("click", openUpload);
+  $("uploadCancel")?.addEventListener("click", closeUpload);
+  $("uploadDrop")?.addEventListener("click", () => fileInput?.click());
+
+  fileInput?.addEventListener("change", () => {
+    const f = fileInput.files && fileInput.files[0];
+    if (!f) return;
+    if (hint) hint.hidden = true;
+    if (preview) {
+      if (f.type.startsWith("image/")) {
+        preview.hidden = false;
+        preview.src = URL.createObjectURL(f);
+      } else {
+        preview.hidden = true;
+        if (hint) {
+          hint.hidden = false;
+          hint.textContent = f.name + " (" + Math.round(f.size / 1024) + " KB)";
+        }
+      }
+    }
+  });
+
+  $("uploadForm")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = fileInput && fileInput.files && fileInput.files[0];
+    if (!f) {
+      if (errEl) {
+        errEl.hidden = false;
+        errEl.textContent = "Escolha um arquivo.";
+      }
+      return;
+    }
+
+    const caption = ($("uploadCaption") && $("uploadCaption").value) || "";
+    const subtle = $("optSubtle") ? $("optSubtle").checked : true;
+    const register = $("optRegister") ? $("optRegister").checked : true;
+    const useCdn = $("optCdn") ? $("optCdn").checked : true;
+
+    if (!useCdn) {
+      if (errEl) {
+        errEl.hidden = false;
+        errEl.textContent = "CDN é obrigatório para publicar no feed.";
+      }
+      return;
+    }
+
+    const fd = new FormData();
+    fd.append("file", f);
+    fd.append("caption", caption);
+    fd.append("register_supabase", register ? "true" : "false");
+    fd.append("cdn_prefix", "uploads");
+    fd.append("subtle", subtle ? "true" : "false");
+    fd.append("remove_metadata", "true");
+
+    const submit = $("uploadSubmit");
+    if (submit) submit.disabled = true;
+    if (errEl) errEl.hidden = true;
+    if (statusEl) {
+      statusEl.hidden = false;
+      statusEl.textContent = subtle
+        ? "Processando + enviando CDN…"
+        : "Enviando para CDN…";
+    }
+
+    const endpoint = subtle ? `${API}/process-and-publish` : `${API}/upload-cdn`;
+
+    try {
+      const res = await fetch(endpoint, { method: "POST", body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false) {
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      if (statusEl) {
+        statusEl.textContent =
+          "Publicado: " + (data.public_url || data.media?.public_url || "ok");
+      }
+      closeUpload();
+      await loadFeed();
+    } catch (err) {
+      if (errEl) {
+        errEl.hidden = false;
+        errEl.textContent = err.message || String(err);
+      }
+      if (statusEl) statusEl.hidden = true;
+    } finally {
+      if (submit) submit.disabled = false;
+    }
+  });
+
+  // Auth modal kept visual-only for now
+  $("btnAuth")?.addEventListener("click", () => {
+    const m = $("authModal");
+    if (m) m.hidden = !m.hidden;
+  });
+  $("authSwitch")?.addEventListener("click", () => {
+    const field = $("authUsernameField");
+    if (field) field.hidden = !field.hidden;
+    const title = $("authTitle");
+    if (title) title.textContent = field && !field.hidden ? "Criar conta" : "Entrar";
+  });
+
+  // Health badge in console
+  fetch(`${API}/health`)
+    .then((r) => r.json())
+    .then((h) => console.info("[lux] health", h))
+    .catch(() => {});
+
+  loadFeed();
 })();
