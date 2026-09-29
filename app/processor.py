@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -31,6 +32,40 @@ def check_ffmpeg() -> str:
     return ffmpeg_path
 
 
+def check_ffprobe() -> Optional[str]:
+    """Return ffprobe path if available."""
+    return shutil.which("ffprobe")
+
+
+def get_duration_seconds(input_path: Path) -> Optional[float]:
+    """Return media duration in seconds via ffprobe, or None if unavailable."""
+    ffprobe = check_ffprobe()
+    if not ffprobe:
+        return None
+    try:
+        result = subprocess.run(
+            [
+                ffprobe,
+                "-v",
+                "quiet",
+                "-print_format",
+                "json",
+                "-show_format",
+                str(input_path),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            return None
+        data = json.loads(result.stdout or "{}")
+        duration = data.get("format", {}).get("duration")
+        return float(duration) if duration is not None else None
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+
+
 def validate_input(input_path: Path) -> None:
     """Validate that the input file exists and has a supported extension."""
     if not input_path.exists():
@@ -58,29 +93,52 @@ def build_ffmpeg_args(
     preserve_aspect: bool = True,
     crf: int = 23,
     preset: str = "medium",
+    subtle: bool = False,
+    trim_start: Optional[float] = None,
+    trim_end: Optional[float] = None,
+    duration: Optional[float] = None,
 ) -> list[str]:
     """
     Build a safe list of arguments for the FFmpeg command.
 
-    All values are passed as separate list elements; no string concatenation
-    of user-controlled data is performed.
+    subtle:
+        Minimal contrast/saturation (+1%), 1px edge crop, volume +1%.
+    trim_start / trim_end:
+        Seconds to cut from the start and/or end of the video.
+    duration:
+        Total media duration in seconds (needed when combining trims).
     """
-    args: list[str] = [
-        "-y",  # overwrite output
-        "-i",
-        str(input_path),
-    ]
+    args: list[str] = ["-y"]
 
-    # Video filters
+    start = float(trim_start or 0.0)
+    end_cut = float(trim_end or 0.0)
+
+    if start > 0:
+        args.extend(["-ss", str(start)])
+
+    args.extend(["-i", str(input_path)])
+
+    if start > 0 or end_cut > 0:
+        if duration is not None and duration > 0:
+            out_len = duration - start - end_cut
+            if out_len <= 0:
+                raise InputValidationError(
+                    "trim_start + trim_end excedem a duração do vídeo"
+                )
+            args.extend(["-t", str(out_len)])
+
     vf_parts: list[str] = []
 
     if crop:
-        # Expected format: w:h:x:y  e.g. 1280:720:0:0
         vf_parts.append(f"crop={crop}")
+
+    if subtle:
+        vf_parts.append("crop=iw-2:ih-2:1:1")
+        vf_parts.append("scale=trunc(iw/2)*2:trunc(ih/2)*2")
+        vf_parts.append("eq=contrast=1.01:saturation=1.01")
 
     if width is not None or height is not None:
         if preserve_aspect:
-            # Scale keeping aspect ratio; -2 means "calculate to keep even dimension"
             w = width if width is not None else -2
             h = height if height is not None else -2
             vf_parts.append(f"scale={w}:{h}")
@@ -92,29 +150,16 @@ def build_ffmpeg_args(
     if vf_parts:
         args.extend(["-vf", ",".join(vf_parts)])
 
-    # Video codec
-    args.extend(
-        [
-            "-c:v",
-            "libx264",
-            "-crf",
-            str(crf),
-            "-preset",
-            preset,
-        ]
-    )
+    if subtle:
+        args.extend(["-af", "volume=1.01"])
 
-    # Audio codec
-    args.extend(["-c:a", "aac"])
+    args.extend(["-c:v", "libx264", "-crf", str(crf), "-preset", preset])
+    args.extend(["-c:a", "aac", "-b:a", "192k"])
 
-    # Metadata removal
     if remove_metadata:
         args.extend(["-map_metadata", "-1"])
 
-    # Fast start for web playback
     args.extend(["-movflags", "+faststart"])
-
-    # Output path
     args.append(str(output_path))
 
     return args
@@ -131,19 +176,34 @@ def process_video(
     preserve_aspect: bool = True,
     crf: int = 23,
     preset: str = "medium",
+    subtle: bool = False,
+    trim_start: Optional[float] = None,
+    trim_end: Optional[float] = None,
 ) -> Path:
-    """
-    Process a video file with FFmpeg.
+    """Process a video file with FFmpeg."""
+    input_path = Path(input_path)
+    output_path = Path(output_path)
 
-    - Validates input
-    - Checks FFmpeg availability
-    - Builds arguments safely
-    - Runs subprocess and raises ProcessingError on failure
-    """
     validate_input(input_path)
     ffmpeg = check_ffmpeg()
 
-    # Ensure output directory exists
+    if trim_start is not None and trim_start < 0:
+        raise InputValidationError("trim_start deve ser >= 0")
+    if trim_end is not None and trim_end < 0:
+        raise InputValidationError("trim_end deve ser >= 0")
+
+    duration: Optional[float] = None
+    needs_duration = (trim_end is not None and trim_end > 0) or (
+        trim_start is not None and trim_start > 0 and trim_end is not None and trim_end > 0
+    )
+    if needs_duration:
+        duration = get_duration_seconds(input_path)
+        if duration is None and trim_end and trim_end > 0:
+            raise ProcessingError(
+                "Não foi possível obter a duração do vídeo (ffprobe ausente ou "
+                "falhou). trim_end requer ffprobe."
+            )
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     args = build_ffmpeg_args(
@@ -156,28 +216,57 @@ def process_video(
         preserve_aspect=preserve_aspect,
         crf=crf,
         preset=preset,
+        subtle=subtle,
+        trim_start=trim_start,
+        trim_end=trim_end,
+        duration=duration,
     )
+
+    # End-only trim without start: use -sseof before -i
+    if (trim_end is not None and trim_end > 0) and not (trim_start and trim_start > 0):
+        if duration is None:
+            args = ["-y", "-sseof", f"-{trim_end}", "-i", str(input_path)]
+            vf_parts = []
+            if crop:
+                vf_parts.append(f"crop={crop}")
+            if subtle:
+                vf_parts.append("crop=iw-2:ih-2:1:1")
+                vf_parts.append("scale=trunc(iw/2)*2:trunc(ih/2)*2")
+                vf_parts.append("eq=contrast=1.01:saturation=1.01")
+            if width is not None or height is not None:
+                if preserve_aspect:
+                    w = width if width is not None else -2
+                    h = height if height is not None else -2
+                    vf_parts.append(f"scale={w}:{h}")
+                else:
+                    w = width if width is not None else -1
+                    h = height if height is not None else -1
+                    vf_parts.append(f"scale={w}:{h}")
+            if vf_parts:
+                args.extend(["-vf", ",".join(vf_parts)])
+            if subtle:
+                args.extend(["-af", "volume=1.01"])
+            args.extend(
+                ["-c:v", "libx264", "-crf", str(crf), "-preset", preset, "-c:a", "aac", "-b:a", "192k"]
+            )
+            if remove_metadata:
+                args.extend(["-map_metadata", "-1"])
+            args.extend(["-movflags", "+faststart", str(output_path)])
 
     cmd = [ffmpeg, *args]
 
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     except OSError as exc:
         raise ProcessingError(f"Falha ao executar FFmpeg: {exc}") from exc
 
     if result.returncode != 0:
-        stderr = (result.stderr or "").strip()
+        stderr_tail = (result.stderr or "")[-2000:]
         raise ProcessingError(
-            f"FFmpeg retornou código {result.returncode}.\n"
-            f"Detalhes: {stderr[-2000:] if stderr else 'sem saída de erro'}"
+            f"FFmpeg retornou código {result.returncode}.\n{stderr_tail}"
         )
 
-    if not output_path.exists():
-        raise ProcessingError("Processamento concluído, mas o arquivo de saída não foi gerado.")
+    if not output_path.exists() or output_path.stat().st_size == 0:
+        raise ProcessingError(f"Arquivo de saída não foi gerado: {output_path}")
 
     return output_path

@@ -92,8 +92,24 @@ python -m app.cli process \
 | `--no-preserve-aspect` | Força dimensões exatas                         | –          |
 | `--crf`                | Qualidade libx264 (0-51, menor = melhor)       | 23         |
 | `--preset`             | Preset de encoding (`ultrafast` … `veryslow`)  | medium     |
+| `--subtle`             | Ajustes mínimos (contraste/saturação +1%, crop 1px, volume +1%) | desativado |
+| `--trim-start SECS`    | Corta N segundos do início                     | –          |
+| `--trim-end SECS`      | Corta N segundos do final (requer ffprobe)     | –          |
 
 ### Exemplos avançados
+
+**Republicar conteúdo próprio (metadados + fingerprint sutil):**
+```bash
+python -m app.cli process \
+  --input input/video.mp4 \
+  --output output/video_limpo.mp4 \
+  --subtle \
+  --trim-start 0.5 \
+  --trim-end 0.5 \
+  --crf 18 \
+  --preset slow
+```
+
 
 **Remover metadados + redimensionar para 1280px de largura (mantendo proporção):**
 ```bash

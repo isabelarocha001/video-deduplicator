@@ -26,87 +26,29 @@ def build_parser() -> argparse.ArgumentParser:
 
     process_parser = subparsers.add_parser(
         "process",
-        help="Processa um vídeo (reencode, remove metadados, crop, resize).",
+        help="Processa um vídeo (reencode, remove metadados, crop, resize, subtle, trim).",
     )
+    process_parser.add_argument("--input", "-i", required=True, type=Path, help="Caminho do arquivo de vídeo de entrada.")
+    process_parser.add_argument("--output", "-o", required=True, type=Path, help="Caminho do arquivo de saída (MP4).")
+    process_parser.add_argument("--remove-metadata", action="store_true", default=True, help="Remove metadados (padrão: ativado).")
+    process_parser.add_argument("--no-remove-metadata", action="store_false", dest="remove_metadata", help="Mantém os metadados originais.")
+    process_parser.add_argument("--crop", type=str, default=None, help="Crop no formato w:h:x:y (ex.: 1280:720:0:0).")
+    process_parser.add_argument("--width", type=int, default=None, help="Largura de saída desejada (pixels).")
+    process_parser.add_argument("--height", type=int, default=None, help="Altura de saída desejada (pixels).")
+    process_parser.add_argument("--preserve-aspect", action="store_true", default=True, help="Preserva a proporção (padrão: ativado).")
+    process_parser.add_argument("--no-preserve-aspect", action="store_false", dest="preserve_aspect", help="Não preserva a proporção.")
+    process_parser.add_argument("--crf", type=int, default=23, help="CRF do libx264 (0-51, padrão: 23).")
     process_parser.add_argument(
-        "--input",
-        "-i",
-        required=True,
-        type=Path,
-        help="Caminho do arquivo de vídeo de entrada.",
-    )
-    process_parser.add_argument(
-        "--output",
-        "-o",
-        required=True,
-        type=Path,
-        help="Caminho do arquivo de saída (MP4).",
-    )
-    process_parser.add_argument(
-        "--remove-metadata",
-        action="store_true",
-        default=True,
-        help="Remove metadados do arquivo de saída (padrão: ativado).",
-    )
-    process_parser.add_argument(
-        "--no-remove-metadata",
-        action="store_false",
-        dest="remove_metadata",
-        help="Mantém os metadados originais.",
-    )
-    process_parser.add_argument(
-        "--crop",
-        type=str,
-        default=None,
-        help="Crop no formato w:h:x:y (ex.: 1280:720:0:0).",
-    )
-    process_parser.add_argument(
-        "--width",
-        type=int,
-        default=None,
-        help="Largura de saída desejada (pixels).",
-    )
-    process_parser.add_argument(
-        "--height",
-        type=int,
-        default=None,
-        help="Altura de saída desejada (pixels).",
-    )
-    process_parser.add_argument(
-        "--preserve-aspect",
-        action="store_true",
-        default=True,
-        help="Preserva a proporção ao redimensionar (padrão: ativado).",
-    )
-    process_parser.add_argument(
-        "--no-preserve-aspect",
-        action="store_false",
-        dest="preserve_aspect",
-        help="Não preserva a proporção (força width/height exatos).",
-    )
-    process_parser.add_argument(
-        "--crf",
-        type=int,
-        default=23,
-        help="CRF do libx264 (0-51, padrão: 23).",
-    )
-    process_parser.add_argument(
-        "--preset",
-        type=str,
-        default="medium",
-        choices=[
-            "ultrafast",
-            "superfast",
-            "veryfast",
-            "faster",
-            "fast",
-            "medium",
-            "slow",
-            "slower",
-            "veryslow",
-        ],
+        "--preset", type=str, default="medium",
+        choices=["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"],
         help="Preset de encoding do libx264 (padrão: medium).",
     )
+    process_parser.add_argument(
+        "--subtle", action="store_true", default=False,
+        help="Ajustes mínimos (contraste/saturação +1%%, crop 1px, volume +1%%) para alterar fingerprint sem mudança visual perceptível.",
+    )
+    process_parser.add_argument("--trim-start", type=float, default=None, metavar="SECS", help="Corta N segundos do início (ex.: 0.5).")
+    process_parser.add_argument("--trim-end", type=float, default=None, metavar="SECS", help="Corta N segundos do final (ex.: 0.5). Requer ffprobe.")
 
     return parser
 
@@ -127,6 +69,9 @@ def main(argv: list[str] | None = None) -> int:
                 preserve_aspect=args.preserve_aspect,
                 crf=args.crf,
                 preset=args.preset,
+                subtle=args.subtle,
+                trim_start=args.trim_start,
+                trim_end=args.trim_end,
             )
             print(f"✓ Processamento concluído: {result}")
             return 0

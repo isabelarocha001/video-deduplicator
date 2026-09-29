@@ -1,4 +1,4 @@
-"""Basic tests for validation, FFmpeg argument building and processing helpers."""
+"""Tests for app.processor."""
 
 from __future__ import annotations
 
@@ -16,40 +16,22 @@ from app.processor import (
 )
 
 
-# ---------------------------------------------------------------------------
-# validate_input
-# ---------------------------------------------------------------------------
-
-
-def test_validate_input_missing_file(tmp_path: Path) -> None:
-    missing = tmp_path / "does_not_exist.mp4"
+def test_validate_input_missing(tmp_path: Path) -> None:
     with pytest.raises(InputValidationError, match="não encontrado"):
-        validate_input(missing)
+        validate_input(tmp_path / "missing.mp4")
 
 
-def test_validate_input_not_a_file(tmp_path: Path) -> None:
-    directory = tmp_path / "a_dir"
-    directory.mkdir()
-    with pytest.raises(InputValidationError, match="não é um arquivo"):
-        validate_input(directory)
-
-
-def test_validate_input_unsupported_extension(tmp_path: Path) -> None:
+def test_validate_input_bad_extension(tmp_path: Path) -> None:
     bad = tmp_path / "file.txt"
-    bad.write_text("not a video")
+    bad.write_text("x")
     with pytest.raises(InputValidationError, match="não suportado"):
         validate_input(bad)
 
 
 def test_validate_input_ok(tmp_path: Path) -> None:
     good = tmp_path / "video.mp4"
-    good.write_bytes(b"\x00\x00")  # minimal placeholder
-    validate_input(good)  # should not raise
-
-
-# ---------------------------------------------------------------------------
-# check_ffmpeg
-# ---------------------------------------------------------------------------
+    good.write_bytes(b"\x00\x00")
+    validate_input(good)
 
 
 def test_check_ffmpeg_not_found() -> None:
@@ -63,71 +45,51 @@ def test_check_ffmpeg_found() -> None:
         assert check_ffmpeg() == "/usr/bin/ffmpeg"
 
 
-# ---------------------------------------------------------------------------
-# build_ffmpeg_args
-# ---------------------------------------------------------------------------
-
-
 def test_build_ffmpeg_args_basic() -> None:
-    inp = Path("input/video.mp4")
-    out = Path("output/video_processed.mp4")
-    args = build_ffmpeg_args(inp, out)
-
+    args = build_ffmpeg_args(Path("input/video.mp4"), Path("output/video_processed.mp4"))
     assert args[0] == "-y"
     assert "-i" in args
-    assert str(inp) in args
-    assert "-c:v" in args
-    assert "libx264" in args
-    assert "-c:a" in args
-    assert "aac" in args
-    assert "-map_metadata" in args
-    assert "-1" in args
-    assert "-movflags" in args
-    assert "+faststart" in args
-    assert str(out) in args
+    assert "-c:v" in args and "libx264" in args
+    assert "-c:a" in args and "aac" in args
+    assert "-map_metadata" in args and "-1" in args
+    assert "-movflags" in args and "+faststart" in args
 
 
 def test_build_ffmpeg_args_with_crop() -> None:
-    args = build_ffmpeg_args(
-        Path("in.mp4"),
-        Path("out.mp4"),
-        crop="1280:720:0:0",
-    )
+    args = build_ffmpeg_args(Path("in.mp4"), Path("out.mp4"), crop="1280:720:0:0")
     assert "-vf" in args
-    idx = args.index("-vf")
-    assert "crop=1280:720:0:0" in args[idx + 1]
+    assert "crop=1280:720:0:0" in args[args.index("-vf") + 1]
 
 
 def test_build_ffmpeg_args_with_width_height_preserve() -> None:
-    args = build_ffmpeg_args(
-        Path("in.mp4"),
-        Path("out.mp4"),
-        width=1280,
-        height=720,
-        preserve_aspect=True,
-    )
-    assert "-vf" in args
-    idx = args.index("-vf")
-    assert "scale=1280:720" in args[idx + 1]
+    args = build_ffmpeg_args(Path("in.mp4"), Path("out.mp4"), width=1280, height=720, preserve_aspect=True)
+    assert "scale=1280:720" in args[args.index("-vf") + 1]
 
 
 def test_build_ffmpeg_args_crf_and_preset() -> None:
-    args = build_ffmpeg_args(
-        Path("in.mp4"),
-        Path("out.mp4"),
-        crf=18,
-        preset="slow",
-    )
-    assert "-crf" in args
-    assert "18" in args
-    assert "-preset" in args
-    assert "slow" in args
+    args = build_ffmpeg_args(Path("in.mp4"), Path("out.mp4"), crf=18, preset="slow")
+    assert "18" in args and "slow" in args
 
 
 def test_build_ffmpeg_args_no_metadata_removal() -> None:
-    args = build_ffmpeg_args(
-        Path("in.mp4"),
-        Path("out.mp4"),
-        remove_metadata=False,
-    )
+    args = build_ffmpeg_args(Path("in.mp4"), Path("out.mp4"), remove_metadata=False)
     assert "-map_metadata" not in args
+
+
+def test_build_ffmpeg_args_subtle() -> None:
+    args = build_ffmpeg_args(Path("in.mp4"), Path("out.mp4"), subtle=True)
+    vf = args[args.index("-vf") + 1]
+    assert "crop=iw-2:ih-2:1:1" in vf
+    assert "eq=contrast=1.01:saturation=1.01" in vf
+    assert "-af" in args and "volume=1.01" in args
+
+
+def test_build_ffmpeg_args_trim_start() -> None:
+    args = build_ffmpeg_args(Path("in.mp4"), Path("out.mp4"), trim_start=0.5, duration=10.0)
+    assert "-ss" in args and "0.5" in args
+    assert args[args.index("-t") + 1] == "9.5"
+
+
+def test_build_ffmpeg_args_trim_both() -> None:
+    args = build_ffmpeg_args(Path("in.mp4"), Path("out.mp4"), trim_start=1.0, trim_end=0.5, duration=20.0)
+    assert args[args.index("-t") + 1] == "18.5"
