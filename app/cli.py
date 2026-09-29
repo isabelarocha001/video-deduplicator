@@ -20,6 +20,11 @@ from app.processor import (
     ProcessingError,
     process_video,
 )
+from app.supabase_media import (
+    SupabaseConfigError,
+    SupabaseMediaError,
+    register_media,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -78,6 +83,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path remoto completo (sobrescreve --cdn-prefix/nome do arquivo).",
     )
 
+
+    process_parser.add_argument(
+        "--register-supabase",
+        action="store_true",
+        default=False,
+        help="Após upload CDN, registra a mídia em vd_media (public_url) no Supabase.",
+    )
+    process_parser.add_argument(
+        "--caption",
+        type=str,
+        default=None,
+        help="Caption opcional ao registrar no Supabase.",
+    )
+
     # ── upload-cdn ───────────────────────────────────────────────────────
     upload_parser = subparsers.add_parser(
         "upload-cdn",
@@ -97,6 +116,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Prefixo se --remote-path não for informado.",
     )
 
+
+    upload_parser.add_argument(
+        "--register-supabase",
+        action="store_true",
+        default=False,
+        help="Registra a mídia em vd_media no Supabase após o upload.",
+    )
+    upload_parser.add_argument(
+        "--caption",
+        type=str,
+        default=None,
+        help="Caption opcional ao registrar no Supabase.",
+    )
+
     # ── cdn-config ───────────────────────────────────────────────────────
     subparsers.add_parser(
         "cdn-config",
@@ -111,6 +144,24 @@ def _do_upload(local: Path, remote: str) -> str:
     public = upload_file(local, remote, config=cfg)
     bust = str(int(time.time()))
     return cfg.public_url(remote, cache_bust=bust)
+
+
+def _maybe_register(local: Path, remote: str, public_url: str, *, enabled: bool, caption: str | None) -> None:
+    if not enabled:
+        return
+    row = register_media(
+        local,
+        public_url=public_url.split("?")[0],
+        storage_path=remote,
+        status="ready",
+        caption=caption,
+    )
+    print(f"✓ Registrado no Supabase vd_media")
+    print(f"  id         : {row.get('id')}")
+    print(f"  public_url : {row.get('public_url')}")
+    print(f"  status     : {row.get('status')}")
+    if row.get("_fingerprint_error"):
+        print(f"  fingerprint: aviso — {row['_fingerprint_error']}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -142,8 +193,15 @@ def main(argv: list[str] | None = None) -> int:
             print(f"✓ Upload CDN concluído")
             print(f"  remote : {remote}")
             print(f"  url    : {url}")
+            _maybe_register(
+                args.input,
+                remote,
+                url,
+                enabled=getattr(args, "register_supabase", False),
+                caption=getattr(args, "caption", None),
+            )
             return 0
-        except (CdnConfigError, CdnUploadError) as exc:
+        except (CdnConfigError, CdnUploadError, SupabaseConfigError, SupabaseMediaError) as exc:
             print(f"Erro CDN: {exc}", file=sys.stderr)
             return 1
         except Exception as exc:  # pragma: no cover
@@ -176,6 +234,18 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"✓ Upload CDN concluído")
                 print(f"  remote : {remote}")
                 print(f"  url    : {url}")
+                _maybe_register(
+                    Path(result),
+                    remote,
+                    url,
+                    enabled=getattr(args, "register_supabase", False),
+                    caption=getattr(args, "caption", None),
+                )
+            elif getattr(args, "register_supabase", False):
+                print(
+                    "Aviso: --register-supabase requer --upload-cdn (precisa de public_url).",
+                    file=sys.stderr,
+                )
 
             return 0
         except FFmpegNotFoundError as exc:
@@ -189,6 +259,9 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         except (CdnConfigError, CdnUploadError) as exc:
             print(f"Erro CDN: {exc}", file=sys.stderr)
+            return 1
+        except (SupabaseConfigError, SupabaseMediaError) as exc:
+            print(f"Erro Supabase: {exc}", file=sys.stderr)
             return 1
         except Exception as exc:  # pragma: no cover
             print(f"Erro inesperado: {exc}", file=sys.stderr)

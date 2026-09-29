@@ -241,3 +241,21 @@ python -m app.cli upload-cdn \
   --remote-path uploads/video_limpo.mp4
 ```
 
+
+### Registrar no Supabase (`vd_media`)
+
+Após o upload CDN, grava `public_url` / `storage_path` em `vd_media` e fingerprint `exact` (SHA-256):
+
+```bash
+export SUPABASE_URL="https://YOUR_PROJECT.supabase.co"
+export SUPABASE_SERVICE_ROLE_KEY="***"
+
+python -m app.cli process \
+  -i input/video.mp4 \
+  -o output/video_limpo.mp4 \
+  --subtle \
+  --upload-cdn \
+  --register-supabase \
+  --caption "Meu vídeo"
+```
+
