@@ -5,14 +5,18 @@ Environment:
   SUPABASE_SERVICE_ROLE_KEY
 
 Uses service role so CLI can insert without user JWT.
+Prefers official supabase client; falls back to PostgREST if package missing.
 Never commit secrets.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import mimetypes
 import os
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any, Optional
 
@@ -25,21 +29,51 @@ class SupabaseMediaError(RuntimeError):
     """Failed to write media registry."""
 
 
-def _client():
-    try:
-        from supabase import create_client
-    except ImportError as exc:
-        raise SupabaseConfigError(
-            "Pacote supabase não instalado. Rode: pip install supabase"
-        ) from exc
-
-    url = (os.environ.get("SUPABASE_URL") or "").strip()
+def _creds() -> tuple[str, str]:
+    url = (os.environ.get("SUPABASE_URL") or "").strip().rstrip("/")
     key = (os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
     if not url or not key:
         raise SupabaseConfigError(
             "SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórios"
         )
+    return url, key
+
+
+def _client():
+    try:
+        from supabase import create_client
+    except ImportError:
+        return None
+    url, key = _creds()
     return create_client(url, key)
+
+
+def _rest_insert(table: str, row: dict[str, Any]) -> dict[str, Any]:
+    base, key = _creds()
+    endpoint = f"{base}/rest/v1/{table}"
+    data = json.dumps(row).encode("utf-8")
+    req = urllib.request.Request(
+        endpoint,
+        data=data,
+        method="POST",
+        headers={
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "Prefer": "return=representation",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            body = json.loads(resp.read().decode("utf-8") or "[]")
+    except urllib.error.HTTPError as exc:
+        err = exc.read().decode("utf-8", errors="replace")[:800]
+        raise SupabaseMediaError(f"REST insert {table} HTTP {exc.code}: {err}") from exc
+    if isinstance(body, list) and body:
+        return body[0]
+    if isinstance(body, dict) and body.get("id"):
+        return body
+    raise SupabaseMediaError(f"REST insert {table} sem linha retornada: {body}")
 
 
 def _media_type_from_path(path: Path) -> str:
@@ -87,7 +121,6 @@ def register_media(
     if not local_path.is_file():
         raise SupabaseMediaError(f"Arquivo não encontrado: {local_path}")
 
-    client = _client()
     mime, _ = mimetypes.guess_type(str(local_path))
     size = local_path.stat().st_size
     meta = dict(metadata or {})
@@ -116,14 +149,17 @@ def register_media(
     if height is not None:
         row["height"] = height
 
-    try:
-        result = client.table("vd_media").insert(row).execute()
-    except Exception as exc:
-        raise SupabaseMediaError(f"Falha ao inserir vd_media: {exc}") from exc
-
-    data = (result.data or [None])[0]
-    if not data:
-        raise SupabaseMediaError("Insert vd_media não retornou linha")
+    client = _client()
+    if client is not None:
+        try:
+            result = client.table("vd_media").insert(row).execute()
+            data = (result.data or [None])[0]
+        except Exception as exc:
+            raise SupabaseMediaError(f"Falha ao inserir vd_media: {exc}") from exc
+        if not data:
+            raise SupabaseMediaError("Insert vd_media não retornou linha")
+    else:
+        data = _rest_insert("vd_media", row)
 
     media_id = data.get("id")
     if register_exact_fingerprint and media_id:
@@ -136,11 +172,13 @@ def register_media(
             "metadata": {"source": "video-deduplicator-cli"},
         }
         try:
-            client.table("vd_media_fingerprints").upsert(
-                fp, on_conflict="media_id,algorithm,version"
-            ).execute()
+            if client is not None:
+                client.table("vd_media_fingerprints").upsert(
+                    fp, on_conflict="media_id,algorithm,version"
+                ).execute()
+            else:
+                _rest_insert("vd_media_fingerprints", fp)
         except Exception as exc:
-            # Media row exists; fingerprint is best-effort
             data["_fingerprint_error"] = str(exc)
 
     return data
