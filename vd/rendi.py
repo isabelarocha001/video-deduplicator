@@ -83,7 +83,7 @@ def build_subtle_command(
     mute_audio: bool = False,
 ) -> str:
     """Build FFmpeg command string for Rendi (no binary name). Uses {{in_1}}/{{out_1}}."""
-    from app.transforms import build_transform_plan, resolve_mode
+    from vd.transforms import build_transform_plan, resolve_mode
 
     plan = build_transform_plan(
         mode=resolve_mode(mode, subtle=subtle),

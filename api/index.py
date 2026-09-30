@@ -1,4 +1,4 @@
-"""Vercel entry: after rewrite the ASGI path is always /api/index."""
+"""Vercel FastAPI entry. ASGI path after rewrite is /api/index."""
 
 from __future__ import annotations
 
@@ -13,16 +13,15 @@ from pathlib import Path
 from typing import Any, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
-for _p in (ROOT, Path(__file__).resolve().parent, Path.cwd()):
-    s = str(_p)
-    if s not in sys.path:
-        sys.path.insert(0, s)
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-app = FastAPI(title="video-deduplicator", version="0.4.1")
+# Vercel requires the ASGI callable to be named exactly "app"
+app = FastAPI(title="video-deduplicator", version="0.4.2")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -57,13 +56,13 @@ async def _save_upload(upload: UploadFile, dest_dir: Path) -> Path:
 
 
 @app.exception_handler(Exception)
-async def _unhandled(request: Request, exc: Exception):
+async def unhandled(request: Request, exc: Exception):
     return JSONResponse(
         {
             "ok": False,
             "error": str(exc),
             "type": type(exc).__name__,
-            "traceback": traceback.format_exc()[-1500:],
+            "traceback": traceback.format_exc()[-1200:],
         },
         status_code=500,
     )
@@ -74,16 +73,12 @@ def health():
     return {
         "status": "healthy",
         "service": "video-deduplicator",
-        "build": "0.4.1-index",
+        "build": "0.4.2",
         "ffmpeg": bool(shutil.which("ffmpeg")),
-        "rendi_configured": bool(os.environ.get("RENDI_API_KEY")),
-        "bunny_configured": bool(
-            os.environ.get("BUNNY_STORAGE_ZONE") and os.environ.get("BUNNY_STORAGE_API_KEY")
-        ),
-        "supabase_configured": bool(
-            os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        ),
-        "app_pkg": (ROOT / "app").is_dir(),
+        "rendi": bool(os.environ.get("RENDI_API_KEY")),
+        "bunny": bool(os.environ.get("BUNNY_STORAGE_ZONE") and os.environ.get("BUNNY_STORAGE_API_KEY")),
+        "supabase": bool(os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY")),
+        "vd_pkg": (ROOT / "vd").is_dir(),
     }
 
 
@@ -112,11 +107,12 @@ async def entry_post(
     if action in ("process-and-publish", "process"):
         variations = 1
 
-    from app.cdn import default_remote_path, delete_file, load_bunny_config, upload_file
-    from app.processor import process_video
-    from app.rendi import process_via_rendi
-    from app.supabase_media import register_media
-    from app.transforms import generate_variation_params
+    # Lazy imports so GET /health never loads heavy modules
+    from vd.cdn import default_remote_path, delete_file, load_bunny_config, upload_file
+    from vd.processor import process_video
+    from vd.rendi import process_via_rendi
+    from vd.supabase_media import register_media
+    from vd.transforms import generate_variation_params
 
     hflip_b = _as_bool(hflip)
     mute_b = _as_bool(mute_audio) or False
@@ -141,9 +137,8 @@ async def entry_post(
     if process_needed and not has_ffmpeg and not has_rendi:
         return _json_error(
             503,
-            "Sem FFmpeg na Vercel e RENDI_API_KEY ausente. Configure no projeto Vercel: "
-            "RENDI_API_KEY, BUNNY_STORAGE_ZONE, BUNNY_STORAGE_API_KEY, BUNNY_STORAGE_HOST, "
-            "BUNNY_CDN_HOSTNAME, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.",
+            "Sem FFmpeg na Vercel e RENDI_API_KEY ausente. "
+            "Defina RENDI_API_KEY + BUNNY_* + SUPABASE_* em Environment Variables.",
         )
 
     try:

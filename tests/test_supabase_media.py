@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.supabase_media import _media_type_from_path, _sha256_file
+from vd.supabase_media import _media_type_from_path, _sha256_file
 
 
 def test_media_type_video(tmp_path: Path) -> None:

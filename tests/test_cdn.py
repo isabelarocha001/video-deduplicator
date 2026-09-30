@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.cdn import (
+from vd.cdn import (
     BunnyConfig,
     CdnConfigError,
     default_remote_path,

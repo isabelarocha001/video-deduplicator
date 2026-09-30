@@ -1,4 +1,4 @@
-from app.transforms import build_transform_plan, resolve_mode
+from vd.transforms import build_transform_plan, resolve_mode
 
 
 def test_resolve_mode_subtle():

@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-from app.transforms import build_transform_plan, resolve_mode
+from vd.transforms import build_transform_plan, resolve_mode
 
 
 class FFmpegNotFoundError(RuntimeError):

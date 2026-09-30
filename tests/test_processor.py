@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.processor import (
+from vd.processor import (
     FFmpegNotFoundError,
     InputValidationError,
     build_ffmpeg_args,

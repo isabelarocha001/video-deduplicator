@@ -36,7 +36,7 @@ duplicate-redteam = [
 ]
 
 [project.scripts]
-video-deduplicator = "app.cli:main"
+video-deduplicator = "vd.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

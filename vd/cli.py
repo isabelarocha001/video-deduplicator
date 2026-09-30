@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 
-from app.cdn import (
+from vd.cdn import (
     CdnConfigError,
     CdnUploadError,
     default_remote_path,
@@ -15,19 +15,19 @@ from app.cdn import (
     load_bunny_config,
     upload_file,
 )
-from app.processor import (
+from vd.processor import (
     FFmpegNotFoundError,
     InputValidationError,
     ProcessingError,
     process_video,
 )
-from app.rendi import (
+from vd.rendi import (
     RendiConfigError,
     RendiError,
     is_configured as rendi_configured,
     process_via_rendi,
 )
-from app.supabase_media import (
+from vd.supabase_media import (
     SupabaseConfigError,
     SupabaseMediaError,
     register_media,
@@ -36,7 +36,7 @@ from app.supabase_media import (
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m app.cli",
+        prog="python -m vd.cli",
         description=(
             "Remover duplicidade de vídeo – processador/normalizador de vídeo "
             "para conteúdo próprio. Utiliza FFmpeg como motor de processamento. "

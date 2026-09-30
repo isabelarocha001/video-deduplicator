@@ -66,13 +66,13 @@ pip install -e ".[dev]"
 O ponto de entrada principal é:
 
 ```bash
-python -m app.cli process --input <entrada> --output <saída>
+python -m vd.cli process --input <entrada> --output <saída>
 ```
 
 ### Exemplo básico
 
 ```bash
-python -m app.cli process \
+python -m vd.cli process \
   --input input/video.mp4 \
   --output output/video_processed.mp4
 ```
@@ -100,7 +100,7 @@ python -m app.cli process \
 
 **Republicar conteúdo próprio (metadados + fingerprint sutil):**
 ```bash
-python -m app.cli process \
+python -m vd.cli process \
   --input input/video.mp4 \
   --output output/video_limpo.mp4 \
   --subtle \
@@ -113,7 +113,7 @@ python -m app.cli process \
 
 **Remover metadados + redimensionar para 1280px de largura (mantendo proporção):**
 ```bash
-python -m app.cli process \
+python -m vd.cli process \
   --input input/video.mp4 \
   --output output/video_hd.mp4 \
   --width 1280 \
@@ -123,7 +123,7 @@ python -m app.cli process \
 
 **Crop + reencode:**
 ```bash
-python -m app.cli process \
+python -m vd.cli process \
   --input input/video.mp4 \
   --output output/video_cropped.mp4 \
   --crop 1280:720:100:50
@@ -219,13 +219,13 @@ Veja também `.env.example`.
 Validar config (não imprime o secret completo):
 
 ```bash
-python -m app.cli cdn-config
+python -m vd.cli cdn-config
 ```
 
 Processar + enviar para CDN:
 
 ```bash
-python -m app.cli process \
+python -m vd.cli process \
   --input input/video.mp4 \
   --output output/video_limpo.mp4 \
   --subtle \
@@ -236,7 +236,7 @@ python -m app.cli process \
 Só upload de arquivo já processado:
 
 ```bash
-python -m app.cli upload-cdn \
+python -m vd.cli upload-cdn \
   --input output/video_limpo.mp4 \
   --remote-path uploads/video_limpo.mp4
 ```
@@ -250,7 +250,7 @@ Após o upload CDN, grava `public_url` / `storage_path` em `vd_media` e fingerpr
 export SUPABASE_URL="https://YOUR_PROJECT.supabase.co"
 export SUPABASE_SERVICE_ROLE_KEY="***"
 
-python -m app.cli process \
+python -m vd.cli process \
   -i input/video.mp4 \
   -o output/video_limpo.mp4 \
   --subtle \
@@ -304,7 +304,7 @@ export BUNNY_STORAGE_ZONE=...
 export BUNNY_STORAGE_API_KEY=...
 export BUNNY_CDN_HOSTNAME=...
 
-python -m app.cli process \
+python -m vd.cli process \
   -i video.mp4 -o out.mp4 \
   --rendi --subtle \
   --upload-cdn --register-supabase

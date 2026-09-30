@@ -1,6 +1,6 @@
 """Tests for app.rendi (offline)."""
 
-from app.rendi import build_subtle_command
+from vd.rendi import build_subtle_command
 
 
 def test_build_subtle_command_contains_placeholders():
