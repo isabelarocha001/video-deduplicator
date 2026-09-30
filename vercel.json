@@ -1,10 +1,5 @@
 {
   "rewrites": [
-    { "source": "/api/process-variations", "destination": "/api/index" },
-    { "source": "/api/process-and-publish", "destination": "/api/index" },
-    { "source": "/api/upload-cdn", "destination": "/api/index" },
-    { "source": "/api/media", "destination": "/api/index" },
-    { "source": "/api/health", "destination": "/api/index" },
     { "source": "/api/(.*)", "destination": "/api/index" },
     { "source": "/process", "destination": "/public/process.html" },
     { "source": "/css/(.*)", "destination": "/public/css/$1" },

@@ -51,7 +51,7 @@
 
     grid.innerHTML = '<p class="empty-state">Carregando…</p>';
     try {
-      const res = await fetch(`${API}/media?limit=48`);
+      const res = await fetch(`${API}/index/media?limit=48`);
       const data = await res.json();
       if (!data.ok) {
         grid.innerHTML = "";
@@ -243,7 +243,7 @@
   });
 
   // Health badge in console
-  fetch(`${API}/health`)
+  fetch(`${API}/index`)
     .then((r) => r.json())
     .then((h) => console.info("[lux] health", h))
     .catch(() => {});

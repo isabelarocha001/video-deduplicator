@@ -138,6 +138,7 @@
 
     const fd = new FormData();
     fd.append("file", f);
+    fd.append("action", n > 1 ? "process-variations" : "process-and-publish");
     fd.append("variations", String(n));
     fd.append("mode", mode);
     fd.append("subtle", "true");
@@ -160,7 +161,7 @@
     setStep("cdn", "active");
     setStep("db", "active");
 
-    const endpoint = n > 1 ? "/api/process-variations" : "/api/process-and-publish";
+    const endpoint = "/api/index";
 
     try {
       const res = await fetch(endpoint, { method: "POST", body: fd });
