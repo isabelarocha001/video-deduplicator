@@ -1,1 +1,0 @@
-"""video-deduplicator core package."""
