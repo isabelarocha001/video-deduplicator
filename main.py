@@ -19,7 +19,7 @@ if str(_ROOT) not in sys.path:
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 app = FastAPI(title="video-deduplicator", version="0.6.0")
 app.add_middleware(
@@ -92,10 +92,10 @@ def health():
 
 @app.get("/process")
 def process_page():
-    page = PUBLIC / "process.html"
-    if page.is_file():
-        return FileResponse(page, media_type="text/html; charset=utf-8")
-    return _err(404, "process.html missing")
+    # The Vercel FastAPI runtime serves files from public/ through the CDN
+    # (public/process.html -> /process.html). Redirect here instead of trying
+    # to read the static file from inside the serverless function bundle.
+    return RedirectResponse(url="/process.html", status_code=307)
 
 
 @app.post("/api/index")
