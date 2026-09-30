@@ -75,7 +75,6 @@ class VercelPathRewrite:
         await self.app(scope, receive, send)
 
 
-app.add_middleware(VercelPathRewrite)  # type: ignore[arg-type]
 
 
 def _json_error(status: int, message: str) -> JSONResponse:
@@ -400,3 +399,7 @@ async def process_and_publish(
         mute_audio=mute_audio,
         seed=42,
     )
+
+# Vercel export: pure ASGI wrapper restores original path
+_fastapi_app = app
+app = VercelPathRewrite(_fastapi_app)  # type: ignore[misc]
