@@ -646,8 +646,3 @@ def api_root():
 
 
 # Optional ASGI adapter for some Vercel Python runtimes
-try:
-    from mangum import Mangum
-    handler = Mangum(app)
-except Exception:
-    handler = app  # type: ignore
