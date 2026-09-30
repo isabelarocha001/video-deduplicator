@@ -165,7 +165,11 @@
     try {
       const res = await fetch(endpoint, { method: "POST", body: fd });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.ok === false) throw new Error(data.error || "HTTP " + res.status);
+      if (!res.ok || data.ok === false) {
+        const detail = data.error || data.message || data.type || ("HTTP " + res.status);
+        const extra = data.traceback ? "\n" + data.traceback.slice(-400) : "";
+        throw new Error(detail + extra);
+      }
 
       setStep("process", "done");
       setStep("cdn", "done");

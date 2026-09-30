@@ -1,13 +1,5 @@
 """
-FastAPI backend for video-deduplicator.
-
-Routes:
-  GET  /api/health
-  GET  /api/cdn-config
-  GET  /api/media
-  POST /api/process
-  POST /api/upload-cdn
-  POST /api/process-and-publish
+FastAPI backend for video-deduplicator (Vercel-safe entrypoint).
 """
 
 from __future__ import annotations
@@ -17,22 +9,25 @@ import shutil
 import sys
 import tempfile
 import time
+import traceback
 import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
-
+# Ensure project root (sibling of api/) is importable on Vercel
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-PUBLIC = ROOT / "public"
+try:
+    from fastapi import FastAPI, File, Form, UploadFile
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import FileResponse, JSONResponse
+except Exception as _imp_err:  # pragma: no cover
+    # Extremely defensive — surface import errors as text if framework missing
+    raise RuntimeError(f"Failed to import FastAPI: {_imp_err}") from _imp_err
 
-app = FastAPI(title="video-deduplicator", version="0.2.0")
+app = FastAPI(title="video-deduplicator", version="0.3.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -40,16 +35,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-if PUBLIC.is_dir():
-    app.mount("/css", StaticFiles(directory=str(PUBLIC / "css")), name="css")
-    app.mount("/js", StaticFiles(directory=str(PUBLIC / "js")), name="js")
-    assets = PUBLIC / "assets"
-    if assets.is_dir():
-        app.mount("/assets", StaticFiles(directory=str(assets)), name="assets")
-
 
 def _json_error(status: int, message: str) -> JSONResponse:
     return JSONResponse({"ok": False, "error": message}, status_code=status)
+
+
+@app.exception_handler(Exception)
+async def _unhandled(request, exc):  # type: ignore[no-untyped-def]
+    tb = traceback.format_exc()
+    # Always return JSON so the frontend can show the real error
+    return JSONResponse(
+        {
+            "ok": False,
+            "error": str(exc),
+            "type": type(exc).__name__,
+            "traceback": tb[-2000:],
+        },
+        status_code=500,
+    )
 
 
 @app.get("/api/health")
@@ -61,8 +64,16 @@ def health():
         "service": "video-deduplicator",
         "ffmpeg": bool(ffmpeg),
         "rendi_configured": bool(os.environ.get("RENDI_API_KEY")),
-        "bunny_configured": bool(os.environ.get("BUNNY_STORAGE_ZONE") and os.environ.get("BUNNY_STORAGE_API_KEY")),
-        "supabase_configured": bool(os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY")),
+        "bunny_configured": bool(
+            os.environ.get("BUNNY_STORAGE_ZONE") and os.environ.get("BUNNY_STORAGE_API_KEY")
+        ),
+        "supabase_configured": bool(
+            os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        ),
+        "force_rendi": os.environ.get("FORCE_RENDI") == "1",
+        "python": sys.version.split()[0],
+        "root": str(ROOT),
+        "app_pkg": str((ROOT / "app").is_dir()),
     }
 
 
@@ -189,7 +200,7 @@ async def upload_cdn_endpoint(
     file: UploadFile = File(...),
     remote_path: Optional[str] = Form(None),
     cdn_prefix: str = Form("uploads"),
-    register_supabase: bool = Form(False),
+    register_supabase: Optional[str] = Form("false"),
     caption: Optional[str] = Form(None),
     mute_audio: Optional[str] = Form(None),
     variations: int = Form(1),
@@ -253,12 +264,12 @@ async def process_variations(
     speed: Optional[float] = Form(None),
     trim_start: Optional[float] = Form(None),
     trim_end: Optional[float] = Form(None),
-    remove_metadata: bool = Form(True),
-    subtle: bool = Form(True),
+    remove_metadata: Optional[str] = Form("true"),
+    subtle: Optional[str] = Form("true"),
     crf: int = Form(20),
     preset: str = Form("medium"),
     cdn_prefix: str = Form("uploads"),
-    register_supabase: bool = Form(True),
+    register_supabase: Optional[str] = Form("true"),
     caption: Optional[str] = Form(None),
     mute_audio: Optional[str] = Form(None),
     seed: int = Form(42),
@@ -282,13 +293,32 @@ async def process_variations(
 
     hflip_b = _as_bool(hflip)
     mute_b = _as_bool(mute_audio) or False
-    variations = max(1, min(int(variations or 1), 10))
+    remove_metadata = _as_bool(remove_metadata) if not isinstance(remove_metadata, bool) else remove_metadata
+    subtle = _as_bool(subtle) if not isinstance(subtle, bool) else subtle
+    register_supabase = _as_bool(register_supabase) if not isinstance(register_supabase, bool) else register_supabase
+    if remove_metadata is None:
+        remove_metadata = True
+    if subtle is None:
+        subtle = True
+    if register_supabase is None:
+        register_supabase = True
 
-    use_rendi = bool(os.environ.get("RENDI_API_KEY")) and (
-        not shutil.which("ffmpeg") or os.environ.get("FORCE_RENDI") == "1"
-    )
-    if not shutil.which("ffmpeg") and not os.environ.get("RENDI_API_KEY"):
-        return _json_error(503, "FFmpeg local e RENDI_API_KEY indisponíveis")
+    # Vercel hobby ~10-60s: cap variations hard on serverless
+    max_var = 3 if not shutil.which("ffmpeg") else 10
+    try:
+        variations = max(1, min(int(variations or 1), max_var))
+    except Exception:
+        variations = 1
+
+    has_ffmpeg = bool(shutil.which("ffmpeg"))
+    has_rendi = bool((os.environ.get("RENDI_API_KEY") or "").strip())
+    use_rendi = has_rendi and (not has_ffmpeg or os.environ.get("FORCE_RENDI") == "1")
+    if not has_ffmpeg and not has_rendi:
+        return _json_error(
+            503,
+            "Sem FFmpeg neste host e RENDI_API_KEY não configurada na Vercel. "
+            "Defina RENDI_API_KEY (e BUNNY_*/SUPABASE_*) em Project Settings → Environment Variables.",
+        )
 
     params_list = generate_variation_params(
         variations,
@@ -416,7 +446,7 @@ async def process_and_publish(
     crf: int = Form(20),
     preset: str = Form("medium"),
     cdn_prefix: str = Form("uploads"),
-    register_supabase: bool = Form(True),
+    register_supabase: Optional[str] = Form("true"),
     caption: Optional[str] = Form(None),
     mute_audio: Optional[str] = Form(None),
     variations: int = Form(1),
@@ -431,6 +461,9 @@ async def process_and_publish(
         return str(v).strip().lower() in ("1", "true", "yes", "on")
     hflip_b = _as_bool(hflip)
     mute_b = _as_bool(mute_audio) or False
+    remove_metadata = _as_bool(remove_metadata) if not isinstance(remove_metadata, bool) else (remove_metadata if remove_metadata is not None else True)
+    subtle = _as_bool(subtle) if not isinstance(subtle, bool) else (subtle if subtle is not None else True)
+    register_supabase = _as_bool(register_supabase) if not isinstance(register_supabase, bool) else (register_supabase if register_supabase is not None else True)
     """
     Full pipeline: process (FFmpeg) → Bunny CDN → optional vd_media register.
     """
@@ -555,6 +588,10 @@ async def process_and_publish(
         return _json_error(500, str(exc))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+
+PUBLIC = ROOT / "public"
 
 
 @app.get("/process")
