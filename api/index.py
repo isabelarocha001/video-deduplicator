@@ -267,7 +267,7 @@ async def process_variations(
     Generate N micro-variations from one video.
     Each variation: process → Bunny CDN → optional vd_media.
     """
-    from app.cdn import CdnConfigError, CdnUploadError, default_remote_path, load_bunny_config, upload_file
+    from app.cdn import CdnConfigError, CdnUploadError, default_remote_path, delete_file, load_bunny_config, upload_file
     from app.processor import InputValidationError, ProcessingError, process_video
     from app.rendi import RendiError, process_via_rendi
     from app.supabase_media import SupabaseConfigError, SupabaseMediaError, register_media
@@ -312,6 +312,7 @@ async def process_variations(
             return _json_error(400, f"cdn config: {exc}")
 
         in_url = None
+        in_remote = None
         if use_rendi:
             try:
                 in_remote = default_remote_path(src, prefix="rendi-in")
@@ -382,12 +383,20 @@ async def process_variations(
             items.append(item)
 
         ok_count = sum(1 for i in items if i.get("ok"))
+        cleaned = False
+        if use_rendi and in_remote and ok_count > 0:
+            try:
+                delete_file(in_remote, config=cfg)
+                cleaned = True
+            except Exception:
+                cleaned = False
         return {
             "ok": ok_count > 0,
             "variations_requested": variations,
             "variations_ok": ok_count,
             "mode": mode,
             "items": items,
+            "rendi_input_cleaned": cleaned,
         }
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -444,8 +453,9 @@ async def process_and_publish(
         out = tmp / "out" / f"{src.stem}_processed.mp4"
         out.parent.mkdir(parents=True, exist_ok=True)
 
+        in_remote = None
         if use_rendi:
-            from app.cdn import default_remote_path as _drp, load_bunny_config as _lbc, upload_file as _up
+            from app.cdn import default_remote_path as _drp, delete_file as _del, load_bunny_config as _lbc, upload_file as _up
             from app.rendi import RendiError, process_via_rendi
 
             # Input must be a public URL for Rendi
@@ -511,6 +521,16 @@ async def process_and_publish(
             "subtle": subtle,
             "mode": mode,
         }
+
+        # Delete temporary original used only as Rendi input
+        if in_remote:
+            try:
+                from app.cdn import delete_file as _del2
+                _del2(in_remote, config=cfg)
+                result["rendi_input_cleaned"] = True
+            except Exception as exc:
+                result["rendi_input_cleaned"] = False
+                result["rendi_input_cleanup_error"] = str(exc)
 
         if register_supabase:
             try:

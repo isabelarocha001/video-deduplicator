@@ -11,6 +11,7 @@ from app.cdn import (
     CdnConfigError,
     CdnUploadError,
     default_remote_path,
+    delete_file,
     load_bunny_config,
     upload_file,
 )
@@ -261,10 +262,11 @@ def main(argv: list[str] | None = None) -> int:
         try:
             if getattr(args, "rendi", False):
                 input_url = getattr(args, "rendi_input_url", None)
+                rendi_in_remote = None
                 # If no URL, upload original to CDN first to get public URL
                 if not input_url:
-                    remote = default_remote_path(args.input, prefix="rendi-in")
-                    input_url = _do_upload(args.input, remote)
+                    rendi_in_remote = default_remote_path(args.input, prefix="rendi-in")
+                    input_url = _do_upload(args.input, rendi_in_remote)
                     print(f"✓ Input no CDN para Rendi: {input_url}")
                 rendi_res = process_via_rendi(
                     input_url.split("?")[0],
@@ -286,6 +288,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"✓ Rendi OK command_id={rendi_res.command_id}")
                 print(f"  output_url: {rendi_res.output_url}")
                 print(f"✓ Processamento concluído: {result}")
+                if rendi_in_remote:
+                    try:
+                        delete_file(rendi_in_remote)
+                        print(f"✓ Original rendi-in removido do Bunny: {rendi_in_remote}")
+                    except Exception as _del_exc:
+                        print(f"Aviso: não removeu rendi-in ({_del_exc})")
             else:
                 result = process_video(
                     input_path=args.input,
