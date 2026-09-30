@@ -101,6 +101,7 @@ def build_ffmpeg_args(
     hflip: Optional[bool] = None,
     crop_percent: Optional[float] = None,
     speed: Optional[float] = None,
+    mute_audio: bool = False,
     trim_start: Optional[float] = None,
     trim_end: Optional[float] = None,
     duration: Optional[float] = None,
@@ -150,11 +151,17 @@ def build_ffmpeg_args(
     if vf_parts:
         args.extend(["-vf", ",".join(vf_parts)])
 
-    if plan.af:
+    if mute_audio:
+        # strip audio entirely
+        pass
+    elif plan.af:
         args.extend(["-af", ",".join(plan.af)])
 
     args.extend(["-c:v", "libx264", "-crf", str(crf), "-preset", preset])
-    args.extend(["-c:a", "aac", "-b:a", "192k"])
+    if mute_audio:
+        args.append("-an")
+    else:
+        args.extend(["-c:a", "aac", "-b:a", "192k"])
 
     if remove_metadata:
         args.extend(["-map_metadata", "-1"])
@@ -180,6 +187,7 @@ def process_video(
     hflip: Optional[bool] = None,
     crop_percent: Optional[float] = None,
     speed: Optional[float] = None,
+    mute_audio: bool = False,
     trim_start: Optional[float] = None,
     trim_end: Optional[float] = None,
 ) -> Path:
@@ -238,6 +246,7 @@ def process_video(
         hflip=hflip,
         crop_percent=crop_percent,
         speed=speed,
+        mute_audio=mute_audio,
         trim_start=trim_start,
         trim_end=trim_end,
         duration=duration,

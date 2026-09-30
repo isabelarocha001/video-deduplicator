@@ -191,6 +191,7 @@ async def upload_cdn_endpoint(
     cdn_prefix: str = Form("uploads"),
     register_supabase: bool = Form(False),
     caption: Optional[str] = Form(None),
+    mute_audio: Optional[str] = Form(None),
     variations: int = Form(1),
     seed: int = Form(42),
 ):
@@ -259,6 +260,7 @@ async def process_variations(
     cdn_prefix: str = Form("uploads"),
     register_supabase: bool = Form(True),
     caption: Optional[str] = Form(None),
+    mute_audio: Optional[str] = Form(None),
     seed: int = Form(42),
 ):
     """
@@ -279,6 +281,7 @@ async def process_variations(
         return str(v).strip().lower() in ("1", "true", "yes", "on")
 
     hflip_b = _as_bool(hflip)
+    mute_b = _as_bool(mute_audio) or False
     variations = max(1, min(int(variations or 1), 10))
 
     use_rendi = bool(os.environ.get("RENDI_API_KEY")) and (
@@ -332,6 +335,7 @@ async def process_variations(
                         hflip=p["hflip"],
                         crop_percent=p["crop_percent"],
                         speed=p["speed"],
+                        mute_audio=mute_b,
                         trim_start=p["trim_start"],
                         trim_end=p["trim_end"],
                         crf=crf,
@@ -348,6 +352,7 @@ async def process_variations(
                         hflip=p["hflip"],
                         crop_percent=p["crop_percent"],
                         speed=p["speed"],
+                        mute_audio=mute_b,
                         trim_start=p["trim_start"],
                         trim_end=p["trim_end"],
                         crf=crf,
@@ -404,6 +409,7 @@ async def process_and_publish(
     cdn_prefix: str = Form("uploads"),
     register_supabase: bool = Form(True),
     caption: Optional[str] = Form(None),
+    mute_audio: Optional[str] = Form(None),
     variations: int = Form(1),
     seed: int = Form(42),
 ):
@@ -415,6 +421,7 @@ async def process_and_publish(
             return v
         return str(v).strip().lower() in ("1", "true", "yes", "on")
     hflip_b = _as_bool(hflip)
+    mute_b = _as_bool(mute_audio) or False
     """
     Full pipeline: process (FFmpeg) → Bunny CDN → optional vd_media register.
     """
@@ -458,6 +465,7 @@ async def process_and_publish(
                     hflip=hflip_b,
                     crop_percent=crop_percent,
                     speed=speed,
+                    mute_audio=mute_b,
                     trim_start=trim_start,
                     trim_end=trim_end,
                     crf=crf,
@@ -477,6 +485,7 @@ async def process_and_publish(
                     hflip=hflip_b,
                     crop_percent=crop_percent,
                     speed=speed,
+                    mute_audio=mute_b,
                     trim_start=trim_start,
                     trim_end=trim_end,
                     crf=crf,

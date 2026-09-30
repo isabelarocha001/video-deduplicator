@@ -146,6 +146,7 @@
     fd.append("cdn_prefix", "uploads");
     fd.append("caption", $("caption")?.value || "");
     fd.append("hflip", $("hflip")?.checked ? "true" : "false");
+    fd.append("mute_audio", $("muteAudio")?.checked ? "true" : "false");
     fd.append("crop_percent", cropPercent?.value || "10");
     fd.append("trim_start", $("trimStart")?.value || "1");
     fd.append("trim_end", $("trimEnd")?.value || "1");

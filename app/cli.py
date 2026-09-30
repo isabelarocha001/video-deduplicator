@@ -90,6 +90,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Velocidade (ex.: 1.02).",
     )
     process_parser.add_argument(
+        "--mute-audio",
+        action="store_true",
+        default=False,
+        help="Remove a faixa de áudio do vídeo (-an).",
+    )
+    process_parser.add_argument(
         "--subtle", action="store_true", default=False,
         help="Ajustes mínimos (+1%% contraste/saturação, crop 1px, volume +1%%).",
     )
@@ -269,6 +275,7 @@ def main(argv: list[str] | None = None) -> int:
                     hflip=True if getattr(args, "hflip", False) else None,
                     crop_percent=getattr(args, "crop_percent", None),
                     speed=getattr(args, "speed", None),
+                    mute_audio=getattr(args, "mute_audio", False),
                     trim_start=args.trim_start,
                     trim_end=args.trim_end,
                     crf=args.crf,
@@ -295,6 +302,7 @@ def main(argv: list[str] | None = None) -> int:
                     hflip=getattr(args, "hflip", None) or None,
                     crop_percent=getattr(args, "crop_percent", None),
                     speed=getattr(args, "speed", None),
+                    mute_audio=getattr(args, "mute_audio", False),
                     trim_start=args.trim_start,
                     trim_end=args.trim_end,
                 )

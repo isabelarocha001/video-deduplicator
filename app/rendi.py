@@ -80,6 +80,7 @@ def build_subtle_command(
     hflip: Optional[bool] = None,
     crop_percent: Optional[float] = None,
     speed: Optional[float] = None,
+    mute_audio: bool = False,
 ) -> str:
     """Build FFmpeg command string for Rendi (no binary name). Uses {{in_1}}/{{out_1}}."""
     from app.transforms import build_transform_plan, resolve_mode
@@ -92,6 +93,7 @@ def build_subtle_command(
         trim_start=trim_start,
         trim_end=trim_end,
         speed=speed,
+        mute_audio=mute_audio,
     )
     parts: list[str] = []
     if plan.trim_start and plan.trim_start > 0:
@@ -100,11 +102,15 @@ def build_subtle_command(
     # Note: end trim without duration is best-effort; Rendi jobs should prefer mode defaults
     if plan.vf:
         parts.extend(["-vf", ",".join(plan.vf)])
-    if plan.af:
+    if mute_audio:
+        pass
+    elif plan.af:
         parts.extend(["-af", ",".join(plan.af)])
-    parts.extend(
-        ["-c:v", "libx264", "-crf", str(crf), "-preset", preset, "-c:a", "aac", "-b:a", "192k"]
-    )
+    parts.extend(["-c:v", "libx264", "-crf", str(crf), "-preset", preset])
+    if mute_audio:
+        parts.append("-an")
+    else:
+        parts.extend(["-c:a", "aac", "-b:a", "192k"])
     if remove_metadata:
         parts.extend(["-map_metadata", "-1"])
     parts.extend(["-movflags", "+faststart", "{{out_1}}"])
@@ -208,6 +214,7 @@ def process_via_rendi(
     hflip: Optional[bool] = None,
     crop_percent: Optional[float] = None,
     speed: Optional[float] = None,
+    mute_audio: bool = False,
     crf: int = 23,
     preset: str = "medium",
     vcpu_count: int = 2,
@@ -230,6 +237,7 @@ def process_via_rendi(
         hflip=hflip,
         crop_percent=crop_percent,
         speed=speed,
+        mute_audio=mute_audio,
     )
     command_id = run_ffmpeg_command(
         input_url=input_url,
