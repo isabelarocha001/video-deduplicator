@@ -1,4 +1,11 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/**/*.py": {
+      "maxDuration": 300,
+      "memory": 1024
+    }
+  },
   "rewrites": [
     { "source": "/process", "destination": "/public/process.html" },
     { "source": "/css/(.*)", "destination": "/public/css/$1" },
