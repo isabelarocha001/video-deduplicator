@@ -76,41 +76,34 @@ def build_subtle_command(
     trim_end: Optional[float] = None,
     subtle: bool = True,
     remove_metadata: bool = True,
+    mode: Optional[str] = None,
+    hflip: Optional[bool] = None,
+    crop_percent: Optional[float] = None,
+    speed: Optional[float] = None,
 ) -> str:
-    """
-    Build an FFmpeg command string for Rendi (without the 'ffmpeg' binary name).
+    """Build FFmpeg command string for Rendi (no binary name). Uses {{in_1}}/{{out_1}}."""
+    from app.transforms import build_transform_plan, resolve_mode
 
-    Uses {{in_1}} / {{out_1}} placeholders.
-    """
+    plan = build_transform_plan(
+        mode=resolve_mode(mode, subtle=subtle),
+        subtle=subtle,
+        hflip=hflip,
+        crop_percent=crop_percent,
+        trim_start=trim_start,
+        trim_end=trim_end,
+        speed=speed,
+    )
     parts: list[str] = []
-    if trim_start and trim_start > 0:
-        parts.extend(["-ss", str(trim_start)])
+    if plan.trim_start and plan.trim_start > 0:
+        parts.extend(["-ss", str(plan.trim_start)])
     parts.extend(["-i", "{{in_1}}"])
-
-    vf: list[str] = []
-    if subtle:
-        vf.append("crop=iw-2:ih-2:1:1")
-        vf.append("scale=trunc(iw/2)*2:trunc(ih/2)*2")
-        vf.append("eq=contrast=1.01:saturation=1.01")
-    if vf:
-        parts.extend(["-vf", ",".join(vf)])
-
-    if subtle:
-        parts.extend(["-af", "volume=1.01"])
-
+    # Note: end trim without duration is best-effort; Rendi jobs should prefer mode defaults
+    if plan.vf:
+        parts.extend(["-vf", ",".join(plan.vf)])
+    if plan.af:
+        parts.extend(["-af", ",".join(plan.af)])
     parts.extend(
-        [
-            "-c:v",
-            "libx264",
-            "-crf",
-            str(crf),
-            "-preset",
-            preset,
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-        ]
+        ["-c:v", "libx264", "-crf", str(crf), "-preset", preset, "-c:a", "aac", "-b:a", "192k"]
     )
     if remove_metadata:
         parts.extend(["-map_metadata", "-1"])
@@ -124,7 +117,7 @@ def run_ffmpeg_command(
     output_filename: str = "output.mp4",
     ffmpeg_command: Optional[str] = None,
     vcpu_count: int = 2,
-    max_command_run_seconds: int = 600,
+    max_command_run_seconds: int = 60,
     metadata: Optional[dict] = None,
 ) -> str:
     """
@@ -211,6 +204,10 @@ def process_via_rendi(
     remove_metadata: bool = True,
     trim_start: Optional[float] = None,
     trim_end: Optional[float] = None,
+    mode: Optional[str] = None,
+    hflip: Optional[bool] = None,
+    crop_percent: Optional[float] = None,
+    speed: Optional[float] = None,
     crf: int = 23,
     preset: str = "medium",
     vcpu_count: int = 2,
@@ -229,6 +226,10 @@ def process_via_rendi(
         trim_end=trim_end,
         subtle=subtle,
         remove_metadata=remove_metadata,
+        mode=mode,
+        hflip=hflip,
+        crop_percent=crop_percent,
+        speed=speed,
     )
     command_id = run_ffmpeg_command(
         input_url=input_url,

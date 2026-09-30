@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/styles.css" />
   <style>
-    .process-page { max-width: 480px; margin: 0 auto; padding: 24px 16px 80px; }
+    .process-page { max-width: 520px; margin: 0 auto; padding: 24px 16px 80px; }
     .process-page h1 { font-size: 1.35rem; margin-bottom: 6px; }
     .process-page .sub { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 20px; }
     .process-card {
@@ -23,10 +23,22 @@
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       min-height: 160px; border: 2px dashed var(--border); border-radius: var(--radius);
       cursor: pointer; padding: 16px; text-align: center; color: var(--text-secondary);
-      margin-bottom: 16px; transition: border-color .15s, background .15s;
+      margin-bottom: 16px;
     }
     .upload-drop:hover, .upload-drop.is-drag { border-color: var(--accent); background: var(--bg-hover); }
     .upload-drop video, .upload-drop img { max-width: 100%; max-height: 220px; border-radius: 8px; margin-top: 8px; }
+    .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
+    .modes label {
+      border: 1px solid var(--border); border-radius: 8px; padding: 10px 8px; text-align: center;
+      cursor: pointer; font-size: 0.85rem;
+    }
+    .modes input { display: none; }
+    .modes input:checked + span { color: var(--accent); font-weight: 600; }
+    .modes label:has(input:checked) { border-color: var(--accent); background: var(--bg-hover); }
+    .controls { display: grid; gap: 10px; margin: 12px 0; font-size: 0.9rem; }
+    .controls .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .controls input[type="range"] { flex: 1; }
+    .controls input[type="number"] { width: 72px; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 6px; }
     .steps { list-style: none; margin: 16px 0; font-size: 0.85rem; color: var(--text-muted); }
     .steps li { padding: 4px 0; }
     .steps li.is-done { color: #2ecc71; }
@@ -34,12 +46,12 @@
     .steps li.is-fail { color: var(--danger); }
     .result-box {
       margin-top: 16px; padding: 12px; border-radius: 8px; background: var(--bg);
-      border: 1px solid var(--border); font-size: 0.85rem; word-break: break-all;
-      display: none;
+      border: 1px solid var(--border); font-size: 0.85rem; word-break: break-all; display: none;
     }
     .result-box.is-visible { display: block; }
     .result-box a { color: var(--accent); }
     .back-link { display: inline-block; margin-bottom: 16px; color: var(--text-muted); font-size: 0.9rem; }
+    .hint-mode { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 8px; }
   </style>
 </head>
 <body>
@@ -55,29 +67,38 @@
   <main class="process-page">
     <a class="back-link" href="/">← Voltar ao feed</a>
     <h1>Processar e publicar</h1>
-    <p class="sub">
-      Uma rota só: microedições → CDN Bunny → registro no Supabase.
-    </p>
+    <p class="sub">Uma rota: microedições → CDN → Supabase. Use o modo <strong>Forte</strong> para republicação.</p>
 
     <div class="process-card">
       <form id="processForm">
         <label class="upload-drop" id="drop">
           <input type="file" id="file" accept="video/mp4,video/webm,video/quicktime,image/*" hidden />
-          <span id="hint">Toque ou arraste foto/vídeo aqui</span>
+          <span id="hint">Toque ou arraste o vídeo aqui</span>
           <video id="previewVideo" controls muted playsinline hidden></video>
           <img id="previewImg" alt="" hidden />
         </label>
 
-        <label class="field">
-          <span>Legenda (opcional)</span>
-          <textarea id="caption" rows="2" maxlength="500" placeholder="Legenda da publicação…"></textarea>
-        </label>
+        <p class="hint-mode">Intensidade das microedições</p>
+        <div class="modes">
+          <label><input type="radio" name="mode" value="light" /><span>Leve</span></label>
+          <label><input type="radio" name="mode" value="medium" /><span>Médio</span></label>
+          <label><input type="radio" name="mode" value="strong" checked /><span>Forte</span></label>
+        </div>
 
-        <ul class="steps" id="steps" aria-live="polite">
-          <li data-step="upload">1. Enviar arquivo</li>
-          <li data-step="process">2. Microedições (subtle + metadados)</li>
+        <div class="controls">
+          <label class="row"><span>Espelhar (hflip)</span><input type="checkbox" id="hflip" checked /></label>
+          <label class="row"><span>Crop % <em id="cropVal">10</em></span><input type="range" id="cropPercent" min="0" max="25" step="1" value="10" /></label>
+          <label class="row"><span>Trim início (s)</span><input type="number" id="trimStart" min="0" step="0.1" value="1" /></label>
+          <label class="row"><span>Trim fim (s)</span><input type="number" id="trimEnd" min="0" step="0.1" value="1" /></label>
+          <label class="row"><span>Velocidade</span><input type="number" id="speed" min="0.9" max="1.1" step="0.01" value="1.02" /></label>
+          <label class="field"><span>Legenda</span><textarea id="caption" rows="2" maxlength="500" placeholder="Opcional"></textarea></label>
+        </div>
+
+        <ul class="steps" id="steps">
+          <li data-step="upload">1. Enviar</li>
+          <li data-step="process">2. Microedições</li>
           <li data-step="cdn">3. Bunny CDN</li>
-          <li data-step="db">4. Registrar vd_media</li>
+          <li data-step="db">4. Supabase</li>
         </ul>
 
         <p class="form-error" id="error" hidden></p>

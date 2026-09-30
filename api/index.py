@@ -242,15 +242,27 @@ async def upload_cdn_endpoint(
 async def process_and_publish(
     file: UploadFile = File(...),
     subtle: bool = Form(True),
+    mode: str = Form("strong"),
+    hflip: Optional[str] = Form(None),  # "true"/"false"
+    crop_percent: Optional[float] = Form(None),
+    speed: Optional[float] = Form(None),
     remove_metadata: bool = Form(True),
     trim_start: Optional[float] = Form(None),
     trim_end: Optional[float] = Form(None),
-    crf: int = Form(23),
+    crf: int = Form(20),
     preset: str = Form("medium"),
     cdn_prefix: str = Form("uploads"),
     register_supabase: bool = Form(True),
     caption: Optional[str] = Form(None),
 ):
+    # normalize form flags from multipart strings
+    def _as_bool(v):
+        if v is None:
+            return None
+        if isinstance(v, bool):
+            return v
+        return str(v).strip().lower() in ("1", "true", "yes", "on")
+    hflip_b = _as_bool(hflip)
     """
     Full pipeline: process (FFmpeg) → Bunny CDN → optional vd_media register.
     """
@@ -290,6 +302,10 @@ async def process_and_publish(
                     output_path=out,
                     subtle=subtle,
                     remove_metadata=remove_metadata,
+                    mode=mode,
+                    hflip=hflip_b,
+                    crop_percent=crop_percent,
+                    speed=speed,
                     trim_start=trim_start,
                     trim_end=trim_end,
                     crf=crf,
@@ -305,6 +321,10 @@ async def process_and_publish(
                     out,
                     remove_metadata=remove_metadata,
                     subtle=subtle,
+                    mode=mode,
+                    hflip=hflip_b,
+                    crop_percent=crop_percent,
+                    speed=speed,
                     trim_start=trim_start,
                     trim_end=trim_end,
                     crf=crf,
@@ -328,6 +348,7 @@ async def process_and_publish(
             "base_url": base_url,
             "processed": True,
             "subtle": subtle,
+            "mode": mode,
         }
 
         if register_supabase:

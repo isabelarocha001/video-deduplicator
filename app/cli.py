@@ -65,6 +65,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="Preset libx264.",
     )
     process_parser.add_argument(
+        "--mode",
+        type=str,
+        default=None,
+        choices=["off", "light", "medium", "strong"],
+        help="Preset de microedições: off|light|medium|strong.",
+    )
+    process_parser.add_argument(
+        "--hflip",
+        action="store_true",
+        default=False,
+        help="Espelhar horizontalmente.",
+    )
+    process_parser.add_argument(
+        "--crop-percent",
+        type=float,
+        default=None,
+        help="Percentual de crop nas bordas (ex.: 10).",
+    )
+    process_parser.add_argument(
+        "--speed",
+        type=float,
+        default=None,
+        help="Velocidade (ex.: 1.02).",
+    )
+    process_parser.add_argument(
         "--subtle", action="store_true", default=False,
         help="Ajustes mínimos (+1%% contraste/saturação, crop 1px, volume +1%%).",
     )
@@ -240,6 +265,10 @@ def main(argv: list[str] | None = None) -> int:
                     output_path=args.output,
                     subtle=args.subtle,
                     remove_metadata=args.remove_metadata,
+                    mode=getattr(args, "mode", None),
+                    hflip=True if getattr(args, "hflip", False) else None,
+                    crop_percent=getattr(args, "crop_percent", None),
+                    speed=getattr(args, "speed", None),
                     trim_start=args.trim_start,
                     trim_end=args.trim_end,
                     crf=args.crf,
@@ -262,6 +291,10 @@ def main(argv: list[str] | None = None) -> int:
                     crf=args.crf,
                     preset=args.preset,
                     subtle=args.subtle,
+                    mode=getattr(args, "mode", None),
+                    hflip=getattr(args, "hflip", None) or None,
+                    crop_percent=getattr(args, "crop_percent", None),
+                    speed=getattr(args, "speed", None),
                     trim_start=args.trim_start,
                     trim_end=args.trim_end,
                 )

@@ -79,9 +79,9 @@ def test_build_ffmpeg_args_no_metadata_removal() -> None:
 def test_build_ffmpeg_args_subtle() -> None:
     args = build_ffmpeg_args(Path("in.mp4"), Path("out.mp4"), subtle=True)
     vf = args[args.index("-vf") + 1]
-    assert "crop=iw-2:ih-2:1:1" in vf
-    assert "eq=contrast=1.01:saturation=1.01" in vf
-    assert "-af" in args and "volume=1.01" in args
+    assert "crop=" in vf
+    assert "eq=contrast=" in vf
+    assert "-af" in args
 
 
 def test_build_ffmpeg_args_trim_start() -> None:

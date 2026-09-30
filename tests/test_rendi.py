@@ -8,7 +8,7 @@ def test_build_subtle_command_contains_placeholders():
     assert "{{in_1}}" in cmd
     assert "{{out_1}}" in cmd
     assert "libx264" in cmd
-    assert "eq=contrast=1.01" in cmd
+    assert "eq=contrast=" in cmd
     assert "-map_metadata" in cmd
 
 

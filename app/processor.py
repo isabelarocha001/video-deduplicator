@@ -8,6 +8,8 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from app.transforms import build_transform_plan, resolve_mode
+
 
 class FFmpegNotFoundError(RuntimeError):
     """Raised when the FFmpeg binary is not available on PATH."""
@@ -82,6 +84,7 @@ def validate_input(input_path: Path) -> None:
         )
 
 
+
 def build_ffmpeg_args(
     input_path: Path,
     output_path: Path,
@@ -94,24 +97,29 @@ def build_ffmpeg_args(
     crf: int = 23,
     preset: str = "medium",
     subtle: bool = False,
+    mode: Optional[str] = None,
+    hflip: Optional[bool] = None,
+    crop_percent: Optional[float] = None,
+    speed: Optional[float] = None,
     trim_start: Optional[float] = None,
     trim_end: Optional[float] = None,
     duration: Optional[float] = None,
 ) -> list[str]:
-    """
-    Build a safe list of arguments for the FFmpeg command.
+    """Build FFmpeg args with transform modes (light/medium/strong)."""
+    plan = build_transform_plan(
+        mode=resolve_mode(mode, subtle=subtle),
+        subtle=subtle,
+        hflip=hflip,
+        crop_percent=crop_percent,
+        trim_start=trim_start,
+        trim_end=trim_end,
+        speed=speed,
+        explicit_crop=crop,
+    )
 
-    subtle:
-        Minimal contrast/saturation (+1%), 1px edge crop, volume +1%.
-    trim_start / trim_end:
-        Seconds to cut from the start and/or end of the video.
-    duration:
-        Total media duration in seconds (needed when combining trims).
-    """
     args: list[str] = ["-y"]
-
-    start = float(trim_start or 0.0)
-    end_cut = float(trim_end or 0.0)
+    start = float(plan.trim_start or 0.0)
+    end_cut = float(plan.trim_end or 0.0)
 
     if start > 0:
         args.extend(["-ss", str(start)])
@@ -127,15 +135,7 @@ def build_ffmpeg_args(
                 )
             args.extend(["-t", str(out_len)])
 
-    vf_parts: list[str] = []
-
-    if crop:
-        vf_parts.append(f"crop={crop}")
-
-    if subtle:
-        vf_parts.append("crop=iw-2:ih-2:1:1")
-        vf_parts.append("scale=trunc(iw/2)*2:trunc(ih/2)*2")
-        vf_parts.append("eq=contrast=1.01:saturation=1.01")
+    vf_parts: list[str] = list(plan.vf)
 
     if width is not None or height is not None:
         if preserve_aspect:
@@ -150,8 +150,8 @@ def build_ffmpeg_args(
     if vf_parts:
         args.extend(["-vf", ",".join(vf_parts)])
 
-    if subtle:
-        args.extend(["-af", "volume=1.01"])
+    if plan.af:
+        args.extend(["-af", ",".join(plan.af)])
 
     args.extend(["-c:v", "libx264", "-crf", str(crf), "-preset", preset])
     args.extend(["-c:a", "aac", "-b:a", "192k"])
@@ -161,7 +161,6 @@ def build_ffmpeg_args(
 
     args.extend(["-movflags", "+faststart"])
     args.append(str(output_path))
-
     return args
 
 
@@ -177,6 +176,10 @@ def process_video(
     crf: int = 23,
     preset: str = "medium",
     subtle: bool = False,
+    mode: Optional[str] = None,
+    hflip: Optional[bool] = None,
+    crop_percent: Optional[float] = None,
+    speed: Optional[float] = None,
     trim_start: Optional[float] = None,
     trim_end: Optional[float] = None,
 ) -> Path:
@@ -192,9 +195,23 @@ def process_video(
     if trim_end is not None and trim_end < 0:
         raise InputValidationError("trim_end deve ser >= 0")
 
+    plan = build_transform_plan(
+        mode=resolve_mode(mode, subtle=subtle),
+        subtle=subtle,
+        hflip=hflip,
+        crop_percent=crop_percent,
+        trim_start=trim_start,
+        trim_end=trim_end,
+        speed=speed,
+        explicit_crop=crop,
+    )
+    # use resolved trims from plan
+    trim_start = plan.trim_start or None
+    trim_end = plan.trim_end or None
+
     duration: Optional[float] = None
     needs_duration = (trim_end is not None and trim_end > 0) or (
-        trim_start is not None and trim_start > 0 and trim_end is not None and trim_end > 0
+        trim_start is not None and trim_start > 0
     )
     if needs_duration:
         duration = get_duration_seconds(input_path)
@@ -217,6 +234,10 @@ def process_video(
         crf=crf,
         preset=preset,
         subtle=subtle,
+        mode=mode,
+        hflip=hflip,
+        crop_percent=crop_percent,
+        speed=speed,
         trim_start=trim_start,
         trim_end=trim_end,
         duration=duration,
