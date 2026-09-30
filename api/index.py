@@ -355,6 +355,14 @@ async def process_and_publish(
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+@app.get("/process")
+def process_page():
+    page = PUBLIC / "process.html"
+    if page.is_file():
+        return FileResponse(page, media_type="text/html; charset=utf-8")
+    return JSONResponse({"error": "process.html missing"}, status_code=404)
+
+
 @app.get("/")
 def index():
     index_file = PUBLIC / "index.html"

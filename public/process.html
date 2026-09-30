@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#000000" />
+  <title>Processar e publicar · Lux</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/styles.css" />
+  <style>
+    .process-page { max-width: 480px; margin: 0 auto; padding: 24px 16px 80px; }
+    .process-page h1 { font-size: 1.35rem; margin-bottom: 6px; }
+    .process-page .sub { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 20px; }
+    .process-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+    .upload-drop {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      min-height: 160px; border: 2px dashed var(--border); border-radius: var(--radius);
+      cursor: pointer; padding: 16px; text-align: center; color: var(--text-secondary);
+      margin-bottom: 16px; transition: border-color .15s, background .15s;
+    }
+    .upload-drop:hover, .upload-drop.is-drag { border-color: var(--accent); background: var(--bg-hover); }
+    .upload-drop video, .upload-drop img { max-width: 100%; max-height: 220px; border-radius: 8px; margin-top: 8px; }
+    .steps { list-style: none; margin: 16px 0; font-size: 0.85rem; color: var(--text-muted); }
+    .steps li { padding: 4px 0; }
+    .steps li.is-done { color: #2ecc71; }
+    .steps li.is-active { color: var(--accent); font-weight: 600; }
+    .steps li.is-fail { color: var(--danger); }
+    .result-box {
+      margin-top: 16px; padding: 12px; border-radius: 8px; background: var(--bg);
+      border: 1px solid var(--border); font-size: 0.85rem; word-break: break-all;
+      display: none;
+    }
+    .result-box.is-visible { display: block; }
+    .result-box a { color: var(--accent); }
+    .back-link { display: inline-block; margin-bottom: 16px; color: var(--text-muted); font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a href="/" class="logo">Lux</a>
+      <div class="topbar-actions">
+        <a href="/process" class="icon-btn" title="Processar">＋</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="process-page">
+    <a class="back-link" href="/">← Voltar ao feed</a>
+    <h1>Processar e publicar</h1>
+    <p class="sub">
+      Uma rota só: microedições → CDN Bunny → registro no Supabase.
+    </p>
+
+    <div class="process-card">
+      <form id="processForm">
+        <label class="upload-drop" id="drop">
+          <input type="file" id="file" accept="video/mp4,video/webm,video/quicktime,image/*" hidden />
+          <span id="hint">Toque ou arraste foto/vídeo aqui</span>
+          <video id="previewVideo" controls muted playsinline hidden></video>
+          <img id="previewImg" alt="" hidden />
+        </label>
+
+        <label class="field">
+          <span>Legenda (opcional)</span>
+          <textarea id="caption" rows="2" maxlength="500" placeholder="Legenda da publicação…"></textarea>
+        </label>
+
+        <ul class="steps" id="steps" aria-live="polite">
+          <li data-step="upload">1. Enviar arquivo</li>
+          <li data-step="process">2. Microedições (subtle + metadados)</li>
+          <li data-step="cdn">3. Bunny CDN</li>
+          <li data-step="db">4. Registrar vd_media</li>
+        </ul>
+
+        <p class="form-error" id="error" hidden></p>
+        <button type="submit" class="btn btn-primary btn-block" id="submit">Processar e publicar</button>
+      </form>
+
+      <div class="result-box" id="result">
+        <strong>Pronto</strong>
+        <div id="resultUrl"></div>
+        <div id="resultId" style="margin-top:6px;color:var(--text-muted)"></div>
+      </div>
+    </div>
+  </main>
+
+  <script src="/js/process.js"></script>
+</body>
+</html>

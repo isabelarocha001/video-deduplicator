@@ -140,8 +140,8 @@
     if (hint) hint.hidden = false;
   }
 
-  $("btnOpenUpload")?.addEventListener("click", openUpload);
-  $("navCreate")?.addEventListener("click", openUpload);
+  $("btnOpenUpload")?.addEventListener("click", () => { location.href = "/process"; });
+  $("navCreate")?.addEventListener("click", () => { location.href = "/process"; });
   $("uploadCancel")?.addEventListener("click", closeUpload);
   $("uploadDrop")?.addEventListener("click", () => fileInput?.click());
 
