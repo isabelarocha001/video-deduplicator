@@ -1,8 +1,5 @@
 """
-video-deduplicator API for Vercel.
-
-Native URL: /api/index
-Frontend posts here with form field action=process-variations|process-and-publish|upload-cdn
+Vercel FastAPI entrypoint (framework preset looks for main.py / app = FastAPI()).
 """
 from __future__ import annotations
 
@@ -16,22 +13,23 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional
 
-# Project root on sys.path (vd package lives there)
-_ROOT = Path(__file__).resolve().parent.parent
+_ROOT = Path(__file__).resolve().parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
-app = FastAPI(title="video-deduplicator", version="0.5.0")
+app = FastAPI(title="video-deduplicator", version="0.6.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+PUBLIC = _ROOT / "public"
 
 
 def _err(status: int, message: str, **extra: Any) -> JSONResponse:
@@ -72,16 +70,14 @@ async def _unhandled(request: Request, exc: Exception):
     )
 
 
-@app.get("/")
 @app.get("/api/index")
-@app.api_route("/{full_path:path}", methods=["GET"])
-def health(full_path: str = ""):
-    """Any GET → health (Vercel may hit various paths)."""
+@app.get("/api/health")
+@app.get("/health")
+def health():
     return {
         "status": "healthy",
         "service": "video-deduplicator",
-        "build": "0.5.0",
-        "path": full_path or "/",
+        "build": "0.6.0",
         "ffmpeg": bool(shutil.which("ffmpeg")),
         "rendi": bool(os.environ.get("RENDI_API_KEY")),
         "bunny": bool(
@@ -94,11 +90,19 @@ def health(full_path: str = ""):
     }
 
 
-@app.post("/")
+@app.get("/process")
+def process_page():
+    page = PUBLIC / "process.html"
+    if page.is_file():
+        return FileResponse(page, media_type="text/html; charset=utf-8")
+    return _err(404, "process.html missing")
+
+
 @app.post("/api/index")
-@app.api_route("/{full_path:path}", methods=["POST"])
+@app.post("/api/process")
+@app.post("/api/process-variations")
+@app.post("/api/process-and-publish")
 async def process_entry(
-    full_path: str = "",
     file: UploadFile = File(...),
     action: Optional[str] = Form("process-variations"),
     variations: int = Form(1),
@@ -151,9 +155,7 @@ async def process_entry(
     if process_needed and not has_ffmpeg and not has_rendi:
         return _err(
             503,
-            "Sem FFmpeg e sem RENDI_API_KEY. Configure Environment Variables na Vercel: "
-            "RENDI_API_KEY, BUNNY_STORAGE_ZONE, BUNNY_STORAGE_API_KEY, BUNNY_STORAGE_HOST, "
-            "BUNNY_CDN_HOSTNAME, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.",
+            "Sem FFmpeg e sem RENDI_API_KEY. Configure Environment Variables na Vercel.",
         )
 
     try:
@@ -269,7 +271,7 @@ async def process_entry(
         return {
             "ok": ok_count > 0,
             "action": action,
-            "build": "0.5.0",
+            "build": "0.6.0",
             "variations_requested": variations,
             "variations_ok": ok_count,
             "mode": mode,
