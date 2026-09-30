@@ -191,6 +191,8 @@ async def upload_cdn_endpoint(
     cdn_prefix: str = Form("uploads"),
     register_supabase: bool = Form(False),
     caption: Optional[str] = Form(None),
+    variations: int = Form(1),
+    seed: int = Form(42),
 ):
     """Upload a file to Bunny Storage and optionally register on vd_media."""
     from app.cdn import CdnConfigError, CdnUploadError, default_remote_path, load_bunny_config, upload_file
@@ -238,6 +240,154 @@ async def upload_cdn_endpoint(
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+
+
+@app.post("/api/process-variations")
+async def process_variations(
+    file: UploadFile = File(...),
+    variations: int = Form(3),
+    mode: str = Form("strong"),
+    hflip: Optional[str] = Form(None),
+    crop_percent: Optional[float] = Form(None),
+    speed: Optional[float] = Form(None),
+    trim_start: Optional[float] = Form(None),
+    trim_end: Optional[float] = Form(None),
+    remove_metadata: bool = Form(True),
+    subtle: bool = Form(True),
+    crf: int = Form(20),
+    preset: str = Form("medium"),
+    cdn_prefix: str = Form("uploads"),
+    register_supabase: bool = Form(True),
+    caption: Optional[str] = Form(None),
+    seed: int = Form(42),
+):
+    """
+    Generate N micro-variations from one video.
+    Each variation: process → Bunny CDN → optional vd_media.
+    """
+    from app.cdn import CdnConfigError, CdnUploadError, default_remote_path, load_bunny_config, upload_file
+    from app.processor import InputValidationError, ProcessingError, process_video
+    from app.rendi import RendiError, process_via_rendi
+    from app.supabase_media import SupabaseConfigError, SupabaseMediaError, register_media
+    from app.transforms import generate_variation_params
+
+    def _as_bool(v):
+        if v is None:
+            return None
+        if isinstance(v, bool):
+            return v
+        return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+    hflip_b = _as_bool(hflip)
+    variations = max(1, min(int(variations or 1), 10))
+
+    use_rendi = bool(os.environ.get("RENDI_API_KEY")) and (
+        not shutil.which("ffmpeg") or os.environ.get("FORCE_RENDI") == "1"
+    )
+    if not shutil.which("ffmpeg") and not os.environ.get("RENDI_API_KEY"):
+        return _json_error(503, "FFmpeg local e RENDI_API_KEY indisponíveis")
+
+    params_list = generate_variation_params(
+        variations,
+        mode=mode,
+        base_hflip=hflip_b,
+        base_crop_percent=crop_percent,
+        base_trim_start=trim_start,
+        base_trim_end=trim_end,
+        base_speed=speed,
+        seed=seed,
+    )
+
+    tmp = Path(tempfile.mkdtemp(prefix="vd-var-"))
+    items = []
+    try:
+        src = await _save_upload(file, tmp / "in")
+        cfg = None
+        try:
+            cfg = load_bunny_config()
+        except Exception as exc:
+            return _json_error(400, f"cdn config: {exc}")
+
+        in_url = None
+        if use_rendi:
+            try:
+                in_remote = default_remote_path(src, prefix="rendi-in")
+                in_url = upload_file(src, in_remote, config=cfg)
+            except Exception as exc:
+                return _json_error(400, f"cdn input for rendi: {exc}")
+
+        for p in params_list:
+            label = p["label"]
+            out = tmp / "out" / f"{src.stem}_{label}.mp4"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            item = {"label": label, "params": p, "ok": False}
+            try:
+                if use_rendi:
+                    process_via_rendi(
+                        in_url.split("?")[0],
+                        output_path=out,
+                        subtle=True,
+                        remove_metadata=remove_metadata,
+                        mode=p["mode"],
+                        hflip=p["hflip"],
+                        crop_percent=p["crop_percent"],
+                        speed=p["speed"],
+                        trim_start=p["trim_start"],
+                        trim_end=p["trim_end"],
+                        crf=crf,
+                        preset=preset,
+                        download=True,
+                    )
+                else:
+                    process_video(
+                        src,
+                        out,
+                        remove_metadata=remove_metadata,
+                        subtle=True,
+                        mode=p["mode"],
+                        hflip=p["hflip"],
+                        crop_percent=p["crop_percent"],
+                        speed=p["speed"],
+                        trim_start=p["trim_start"],
+                        trim_end=p["trim_end"],
+                        crf=crf,
+                        preset=preset,
+                    )
+
+                remote = f"{cdn_prefix.rstrip('/')}/{out.name}"
+                base_url = upload_file(out, remote, config=cfg)
+                public = cfg.public_url(remote, cache_bust=str(int(time.time())))
+                item.update({"ok": True, "remote": remote, "public_url": public, "base_url": base_url})
+
+                if register_supabase:
+                    try:
+                        row = register_media(
+                            out,
+                            public_url=public.split("?")[0],
+                            storage_path=remote,
+                            status="ready",
+                            caption=(f"{caption} ({label})" if caption else label),
+                            metadata={"variation": label, "params": p},
+                        )
+                        item["media"] = {"id": row.get("id"), "public_url": row.get("public_url")}
+                    except (SupabaseConfigError, SupabaseMediaError) as exc:
+                        item["supabase_error"] = str(exc)
+            except Exception as exc:
+                item["error"] = str(exc)
+            items.append(item)
+
+        ok_count = sum(1 for i in items if i.get("ok"))
+        return {
+            "ok": ok_count > 0,
+            "variations_requested": variations,
+            "variations_ok": ok_count,
+            "mode": mode,
+            "items": items,
+        }
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 @app.post("/api/process-and-publish")
 async def process_and_publish(
     file: UploadFile = File(...),
@@ -254,6 +404,8 @@ async def process_and_publish(
     cdn_prefix: str = Form("uploads"),
     register_supabase: bool = Form(True),
     caption: Optional[str] = Form(None),
+    variations: int = Form(1),
+    seed: int = Form(42),
 ):
     # normalize form flags from multipart strings
     def _as_bool(v):
@@ -405,6 +557,7 @@ def api_root():
             "GET  /api/media",
             "POST /api/process",
             "POST /api/upload-cdn",
+            "POST /api/process-variations",
             "POST /api/process-and-publish",
         ],
     }

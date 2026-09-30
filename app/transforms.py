@@ -165,3 +165,96 @@ def build_transform_plan(
         extra_input_args=extra_in,
         notes=notes,
     )
+
+
+def generate_variation_params(
+    n: int,
+    *,
+    mode: str = "strong",
+    base_hflip: Optional[bool] = None,
+    base_crop_percent: Optional[float] = None,
+    base_trim_start: Optional[float] = None,
+    base_trim_end: Optional[float] = None,
+    base_speed: Optional[float] = None,
+    seed: int = 42,
+) -> list[dict]:
+    """
+    Build N slightly different param dicts for micro-variations of the same source.
+
+    Each item: {mode, hflip, crop_percent, trim_start, trim_end, speed, label}
+    """
+    import random
+
+    n = max(1, min(int(n), 20))
+    rng = random.Random(seed)
+    mode = resolve_mode(mode, subtle=False)
+
+    # ranges by mode
+    ranges = {
+        "off": dict(crop=(0, 0), trim=(0.0, 0.0), speed=(1.0, 1.0), flip_p=0.0),
+        "light": dict(crop=(0.5, 2.0), trim=(0.2, 0.5), speed=(1.0, 1.01), flip_p=0.0),
+        "medium": dict(crop=(3.0, 7.0), trim=(0.5, 1.2), speed=(1.005, 1.02), flip_p=0.25),
+        "strong": dict(crop=(8.0, 14.0), trim=(0.8, 1.8), speed=(1.01, 1.04), flip_p=0.85),
+    }
+    r = ranges.get(mode, ranges["strong"])
+
+    out: list[dict] = []
+    for i in range(n):
+        # alternate flip for diversity when not forced
+        if base_hflip is not None:
+            flip = bool(base_hflip)
+            # for variations after first, occasionally invert if n>1 and strong/medium
+            if i > 0 and mode in ("medium", "strong") and base_hflip is True:
+                flip = rng.random() < 0.7  # mostly keep flip
+            elif i > 0 and base_hflip is False and mode == "strong":
+                flip = rng.random() < 0.5
+        else:
+            flip = rng.random() < r["flip_p"]
+            if i == 0 and mode == "strong":
+                flip = True
+
+        crop = (
+            float(base_crop_percent)
+            if base_crop_percent is not None and i == 0
+            else round(rng.uniform(*r["crop"]), 2)
+        )
+        if base_crop_percent is not None and i > 0:
+            # jitter ±2%
+            crop = max(0.0, min(25.0, float(base_crop_percent) + rng.uniform(-2.0, 2.0)))
+
+        t0 = (
+            float(base_trim_start)
+            if base_trim_start is not None and i == 0
+            else round(rng.uniform(*r["trim"]), 2)
+        )
+        t1 = (
+            float(base_trim_end)
+            if base_trim_end is not None and i == 0
+            else round(rng.uniform(*r["trim"]), 2)
+        )
+        if base_trim_start is not None and i > 0:
+            t0 = max(0.0, float(base_trim_start) + rng.uniform(-0.3, 0.3))
+        if base_trim_end is not None and i > 0:
+            t1 = max(0.0, float(base_trim_end) + rng.uniform(-0.3, 0.3))
+
+        spd = (
+            float(base_speed)
+            if base_speed is not None and i == 0
+            else round(rng.uniform(*r["speed"]), 4)
+        )
+        if base_speed is not None and i > 0:
+            spd = round(max(0.9, min(1.1, float(base_speed) + rng.uniform(-0.015, 0.015))), 4)
+
+        out.append(
+            {
+                "mode": mode,
+                "hflip": flip,
+                "crop_percent": crop,
+                "trim_start": t0,
+                "trim_end": t1,
+                "speed": spd,
+                "label": f"v{i + 1}",
+                "index": i + 1,
+            }
+        )
+    return out

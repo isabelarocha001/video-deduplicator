@@ -11,6 +11,7 @@
   const resultBox = $("result");
   const resultUrl = $("resultUrl");
   const resultId = $("resultId");
+  const resultList = $("resultList");
   const steps = $("steps");
   const cropPercent = $("cropPercent");
   const cropVal = $("cropVal");
@@ -121,18 +122,23 @@
     }
     const mode =
       document.querySelector('input[name="mode"]:checked')?.value || "strong";
+    let n = parseInt($("variations")?.value || "1", 10);
+    if (isNaN(n) || n < 1) n = 1;
+    if (n > 10) n = 10;
 
     showError("");
     resetSteps();
     resultBox?.classList.remove("is-visible");
+    if (resultList) resultList.innerHTML = "";
     if (submitBtn) {
       submitBtn.disabled = true;
-      submitBtn.textContent = "Processando…";
+      submitBtn.textContent = n > 1 ? `Gerando ${n} variações…` : "Processando…";
     }
     setStep("upload", "active");
 
     const fd = new FormData();
     fd.append("file", f);
+    fd.append("variations", String(n));
     fd.append("mode", mode);
     fd.append("subtle", "true");
     fd.append("remove_metadata", "true");
@@ -146,35 +152,62 @@
     fd.append("speed", $("speed")?.value || "1.02");
     fd.append("crf", "20");
     fd.append("preset", "medium");
+    fd.append("seed", String(Date.now() % 100000));
 
     setStep("upload", "done");
     setStep("process", "active");
     setStep("cdn", "active");
     setStep("db", "active");
 
+    const endpoint = n > 1 ? "/api/process-variations" : "/api/process-and-publish";
+
     try {
-      const res = await fetch("/api/process-and-publish", { method: "POST", body: fd });
+      const res = await fetch(endpoint, { method: "POST", body: fd });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.ok === false) throw new Error(data.error || "HTTP " + res.status);
 
       setStep("process", "done");
       setStep("cdn", "done");
-      if (data.supabase_error) {
-        setStep("db", "fail");
-        showError("CDN ok, Supabase: " + data.supabase_error);
-      } else setStep("db", "done");
+      setStep("db", "done");
 
-      const url = data.public_url || data.media?.public_url || "";
       resultBox?.classList.add("is-visible");
-      if (resultUrl) {
-        resultUrl.innerHTML = url
-          ? 'URL: <a href="' + url + '" target="_blank" rel="noopener">' + url + "</a>"
-          : "Sem URL";
-      }
-      if (resultId) {
-        resultId.textContent =
-          (data.mode ? "modo=" + data.mode + " · " : "") +
-          (data.media?.id ? "id " + data.media.id : data.remote || "");
+
+      if (data.items && Array.isArray(data.items)) {
+        const ok = data.variations_ok || data.items.filter((i) => i.ok).length;
+        if (resultUrl) {
+          resultUrl.textContent = `${ok} de ${data.variations_requested || n} variações geradas`;
+        }
+        if (resultId) resultId.textContent = "modo=" + (data.mode || mode);
+        if (resultList) {
+          resultList.innerHTML = data.items
+            .map((it) => {
+              if (!it.ok) {
+                return `<div style="margin:8px 0;color:var(--danger)">${it.label}: ${it.error || "falhou"}</div>`;
+              }
+              const url = it.public_url || "";
+              const params = it.params
+                ? `crop ${it.params.crop_percent}% · flip ${it.params.hflip} · speed ${it.params.speed}`
+                : "";
+              return `<div style="margin:10px 0;padding:8px;border:1px solid var(--border);border-radius:8px">
+                <strong>${it.label}</strong> <span style="color:var(--text-muted);font-size:12px">${params}</span><br/>
+                <a href="${url}" target="_blank" rel="noopener">${url}</a>
+                ${it.media?.id ? `<div style="font-size:12px;color:var(--text-muted)">id ${it.media.id}</div>` : ""}
+              </div>`;
+            })
+            .join("");
+        }
+      } else {
+        const url = data.public_url || data.media?.public_url || "";
+        if (resultUrl) {
+          resultUrl.innerHTML = url
+            ? 'URL: <a href="' + url + '" target="_blank" rel="noopener">' + url + "</a>"
+            : "Sem URL";
+        }
+        if (resultId) {
+          resultId.textContent =
+            (data.mode ? "modo=" + data.mode + " · " : "") +
+            (data.media?.id ? "id " + data.media.id : data.remote || "");
+        }
       }
     } catch (err) {
       setStep("process", "fail");
