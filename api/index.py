@@ -16,8 +16,11 @@ from typing import Optional
 
 # Ensure project root (sibling of api/) is importable on Vercel
 ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+API_DIR = Path(__file__).resolve().parent
+for _p in (ROOT, API_DIR, Path.cwd()):
+    s = str(_p)
+    if s not in sys.path:
+        sys.path.insert(0, s)
 
 try:
     from fastapi import FastAPI, File, Form, UploadFile
@@ -627,3 +630,11 @@ def api_root():
             "POST /api/process-and-publish",
         ],
     }
+
+
+# Optional ASGI adapter for some Vercel Python runtimes
+try:
+    from mangum import Mangum
+    handler = Mangum(app)
+except Exception:
+    handler = app  # type: ignore
