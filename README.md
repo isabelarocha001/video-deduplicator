@@ -155,6 +155,8 @@ Com `--remove-metadata` (ativado por padrão), o processador usa `-map_metadata 
 
 O novo MP4 ainda recebe os dados técnicos necessários do reencode, como codec, resolução, duração e encoder. Horários e outros atributos do arquivo no Windows não fazem parte do vídeo e não são alterados. Esta opção não promete remover toda tag específica de stream, capítulos ou dados técnicos gerados pelo próprio processamento.
 
+Na interface, ao selecionar um vídeo, o endpoint `/api/inspect` lê e mostra os metadados atuais antes do processamento. Depois de cada variação concluída, a resposta inclui `metadata_after` e `metadata_removed_details`, permitindo conferir quais tags realmente deixaram de existir no arquivo gerado.
+
 ### Formatos de entrada suportados
 
 `.mp4`, `.mkv`, `.avi`, `.mov`, `.webm`, `.flv`, `.wmv`, `.m4v`

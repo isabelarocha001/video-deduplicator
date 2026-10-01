@@ -44,6 +44,57 @@ def _as_bool(v: Any) -> Optional[bool]:
     return str(v).strip().lower() in ("1", "true", "yes", "on")
 
 
+def _probe_metadata_safe(path: Path) -> dict[str, Any]:
+    """Probe metadata without making processing fail when inspection is unavailable."""
+    try:
+        from vd.processor import probe_metadata
+
+        return probe_metadata(path)
+    except Exception as exc:
+        return {"available": False, "error": str(exc)}
+
+
+def _metadata_entries(snapshot: Optional[dict[str, Any]]) -> list[dict[str, str]]:
+    """Flatten global, stream and chapter tags for comparison and display."""
+    if not snapshot or not snapshot.get("available"):
+        return []
+
+    entries: list[dict[str, str]] = []
+
+    for key, value in (snapshot.get("tags") or {}).items():
+        entries.append({"scope": "Contêiner", "key": str(key), "value": str(value)})
+
+    for stream in snapshot.get("streams") or []:
+        index = stream.get("index", "?")
+        stream_type = stream.get("codec_type") or "stream"
+        scope = f"Stream {index} ({stream_type})"
+        for key, value in (stream.get("tags") or {}).items():
+            entries.append({"scope": scope, "key": str(key), "value": str(value)})
+
+    for chapter in snapshot.get("chapters") or []:
+        chapter_id = chapter.get("id", "?")
+        scope = f"Capítulo {chapter_id}"
+        for key, value in (chapter.get("tags") or {}).items():
+            entries.append({"scope": scope, "key": str(key), "value": str(value)})
+
+    return entries
+
+
+def _removed_metadata(
+    before: Optional[dict[str, Any]], after: Optional[dict[str, Any]]
+) -> list[dict[str, str]]:
+    """Return source tags that are absent or changed in the processed output."""
+    after_entries = {
+        (entry["scope"], entry["key"]): entry["value"]
+        for entry in _metadata_entries(after)
+    }
+    return [
+        entry
+        for entry in _metadata_entries(before)
+        if after_entries.get((entry["scope"], entry["key"])) != entry["value"]
+    ]
+
+
 async def _save_upload(upload: UploadFile, dest_dir: Path) -> Path:
     dest_dir.mkdir(parents=True, exist_ok=True)
     suffix = Path(upload.filename or "upload.bin").suffix or ".bin"
@@ -98,6 +149,20 @@ def process_page():
     # (public/process.html -> /process.html). Redirect here instead of trying
     # to read the static file from inside the serverless function bundle.
     return RedirectResponse(url="/process.html", status_code=307)
+
+
+@app.post("/api/inspect")
+async def inspect_entry(file: UploadFile = File(...)):
+    """Inspect the uploaded file before processing, without storing it remotely."""
+    tmp = Path(tempfile.mkdtemp(prefix="vd-inspect-"))
+    try:
+        src = await _save_upload(file, tmp / "in")
+        metadata = _probe_metadata_safe(src)
+        if not metadata.get("available"):
+            return _err(503, metadata.get("error", "Não foi possível ler os metadados."))
+        return {"ok": True, "metadata": metadata}
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 @app.post("/api/index")
@@ -194,6 +259,7 @@ async def process_entry(
     in_remote = None
     try:
         src = await _save_upload(file, tmp / "in")
+        source_metadata = _probe_metadata_safe(src)
         in_url = None
         if use_rendi and process_needed:
             in_remote = default_storage_path(src, prefix="rendi-in")
@@ -243,6 +309,8 @@ async def process_entry(
                 else:
                     upload_src = src
 
+                output_metadata = _probe_metadata_safe(upload_src)
+
                 remote = default_storage_path(
                     upload_src,
                     prefix=cdn_prefix,
@@ -264,6 +332,10 @@ async def process_entry(
                             "audio_removed": bool(mute_b),
                             "metadata_removed": bool(remove_b),
                         },
+                        "metadata_after": output_metadata,
+                        "metadata_removed_details": _removed_metadata(
+                            source_metadata, output_metadata
+                        ),
                     }
                 )
 
@@ -307,6 +379,7 @@ async def process_entry(
             "rendi_input_cleaned": cleaned,
             "public_url": items[0].get("public_url") if items and items[0].get("ok") else None,
             "media": items[0].get("media") if items and items[0].get("ok") else None,
+            "metadata_before": source_metadata,
         }
         if ok_count == 0:
             result["error"] = "Nenhuma variação foi processada. Veja o erro de cada item."

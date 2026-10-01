@@ -13,6 +13,8 @@
   const resultId = $("resultId");
   const resultSummary = $("resultSummary");
   const resultList = $("resultList");
+  const metadataPanel = $("metadataPanel");
+  const metadataContent = $("metadataContent");
   const steps = $("steps");
   const cropPercent = $("cropPercent");
   const cropVal = $("cropVal");
@@ -25,6 +27,7 @@
   let progressTimer = null;
   let progressStartedAt = 0;
   let progressValue = 0;
+  let metadataRequestId = 0;
 
   const PRESETS = {
     light: { hflip: false, crop: 1, trimStart: 0.3, trimEnd: 0.3, speed: 1.0 },
@@ -155,6 +158,85 @@
     }
   }
 
+  function metadataEntries(snapshot) {
+    if (!snapshot || !snapshot.available) return [];
+    const entries = [];
+    Object.entries(snapshot.tags || {}).forEach(([key, value]) => {
+      entries.push({ scope: "Contêiner", key, value });
+    });
+    (snapshot.streams || []).forEach((stream) => {
+      const scope = `Stream ${stream.index ?? "?"} (${stream.codec_type || "stream"})`;
+      Object.entries(stream.tags || {}).forEach(([key, value]) => {
+        entries.push({ scope, key, value });
+      });
+    });
+    (snapshot.chapters || []).forEach((chapter) => {
+      const scope = `Capítulo ${chapter.id ?? "?"}`;
+      Object.entries(chapter.tags || {}).forEach(([key, value]) => {
+        entries.push({ scope, key, value });
+      });
+    });
+    return entries;
+  }
+
+  function renderMetadataSnapshot(snapshot) {
+    if (!snapshot || !snapshot.available) {
+      return `<p class="metadata-muted">${escapeHtml(snapshot?.error || "Não foi possível ler os metadados neste ambiente.")}</p>`;
+    }
+    const entries = metadataEntries(snapshot);
+    const tags = entries.length
+      ? `<ul class="metadata-list">${entries.map((entry) =>
+          `<li><strong>${escapeHtml(entry.scope)} · ${escapeHtml(entry.key)}:</strong> ${escapeHtml(entry.value)}</li>`
+        ).join("")}</ul>`
+      : `<p class="metadata-muted">Nenhuma tag de metadado foi encontrada.</p>`;
+    const format = snapshot.format || {};
+    const technical = [
+      ["Formato", format.format_name],
+      ["Duração", format.duration ? `${numberPt(format.duration, 2)} s` : ""],
+      ["Tamanho", format.size ? `${numberPt(Number(format.size) / 1024 / 1024, 2)} MB` : ""],
+      ["Bitrate", format.bit_rate ? `${numberPt(Number(format.bit_rate) / 1000, 0)} kbps` : ""],
+    ].filter(([, value]) => value !== undefined && value !== null && value !== "");
+    const technicalHtml = technical.length
+      ? `<h3>Informações técnicas detectadas</h3><ul class="metadata-list">${technical.map(([label, value]) =>
+          `<li><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</li>`
+        ).join("")}</ul>`
+      : "";
+    return `<h3>Tags encontradas no arquivo original</h3>${tags}${technicalHtml}`;
+  }
+
+  function renderRemovedMetadata(item) {
+    const removed = item.metadata_removed_details || [];
+    const removedHtml = removed.length
+      ? `<ul class="metadata-list">${removed.map((entry) =>
+          `<li><strong>${escapeHtml(entry.scope)} · ${escapeHtml(entry.key)}:</strong> ${escapeHtml(entry.value)}</li>`
+        ).join("")}</ul>`
+      : `<p class="metadata-muted">Nenhuma tag de origem foi identificada para remoção.</p>`;
+    const output = item.metadata_after && item.metadata_after.available
+      ? `<details class="metadata-output"><summary>Metadados detectados no arquivo processado</summary>${renderMetadataSnapshot(item.metadata_after)}</details>`
+      : "";
+    return `<div class="metadata-removed"><h3>Metadados removidos nesta versão</h3>${removedHtml}${output}</div>`;
+  }
+
+  async function inspectFileMetadata(file) {
+    const requestId = ++metadataRequestId;
+    if (metadataPanel) metadataPanel.hidden = false;
+    if (metadataContent) metadataContent.innerHTML = `<p class="metadata-muted">Lendo os metadados do vídeo…</p>`;
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      const res = await fetch("/api/inspect", { method: "POST", body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (requestId !== metadataRequestId) return;
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || `Não foi possível ler os metadados (HTTP ${res.status}).`);
+      }
+      if (metadataContent) metadataContent.innerHTML = renderMetadataSnapshot(data.metadata);
+    } catch (err) {
+      if (requestId !== metadataRequestId) return;
+      if (metadataContent) metadataContent.innerHTML = `<p class="metadata-muted">${escapeHtml(err.message || String(err))}</p>`;
+    }
+  }
+
   function renderChanges(item) {
     const changes = item.changes || item.params || {};
     const rows = [
@@ -204,6 +286,8 @@
     if (progressTimer) window.clearInterval(progressTimer);
     progressTimer = null;
     if (progressPanel) progressPanel.hidden = true;
+    if (metadataPanel) metadataPanel.hidden = false;
+    if (metadataContent) metadataContent.innerHTML = `<p class="metadata-muted">Lendo os metadados do vídeo…</p>`;
     resultBox?.classList.remove("is-visible");
     if (hint) hint.hidden = true;
     if (previewVideo) {
@@ -225,6 +309,7 @@
       hint.hidden = false;
       hint.textContent = f.name;
     }
+    inspectFileMetadata(f);
   }
 
   form?.addEventListener("submit", async (e) => {
@@ -345,6 +430,7 @@
                 <div class="result-changes">${renderChanges(it)}</div>
                 ${preview}
                 ${link}
+                ${renderRemovedMetadata(it)}
                 ${registration}
               </div>`;
             })

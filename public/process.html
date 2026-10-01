@@ -80,6 +80,19 @@
     .metadata-spec ul { margin: 8px 0 0; padding-left: 20px; }
     .metadata-spec li { margin: 3px 0; }
     .metadata-spec p { margin: 10px 0 0; }
+    .metadata-panel { margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font-size: 0.8rem; }
+    .metadata-panel[hidden] { display: none; }
+    .metadata-panel h2 { margin: 0 0 8px; font-size: 0.9rem; }
+    .metadata-panel h3 { margin: 10px 0 5px; font-size: 0.78rem; color: var(--text); }
+    .metadata-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+    .metadata-list li { display: flex; flex-wrap: wrap; gap: 5px; color: var(--text-secondary); }
+    .metadata-list strong { color: var(--text); font-weight: 600; }
+    .metadata-muted { color: var(--text-muted); }
+    .metadata-removed { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+    .metadata-removed h3 { color: #2ecc71; }
+    .metadata-removed li::before { content: "✓"; color: #2ecc71; margin-right: 3px; }
+    .metadata-output { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+    .metadata-output summary { cursor: pointer; color: var(--text-secondary); }
   </style>
 </head>
 <body>
@@ -105,6 +118,11 @@
           <video id="previewVideo" controls muted playsinline hidden></video>
           <img id="previewImg" alt="" hidden />
         </label>
+
+        <section class="metadata-panel" id="metadataPanel" hidden aria-live="polite">
+          <h2>Metadados atuais do vídeo</h2>
+          <div id="metadataContent"></div>
+        </section>
 
         <p class="hint-mode">Intensidade das microedições</p>
         <div class="modes">

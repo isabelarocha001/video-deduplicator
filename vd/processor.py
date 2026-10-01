@@ -68,6 +68,98 @@ def get_duration_seconds(input_path: Path) -> Optional[float]:
         return None
 
 
+def probe_metadata(input_path: Path) -> dict:
+    """Return user-visible metadata from a media file using ffprobe.
+
+    The full filename is intentionally not returned because uploads are stored
+    under temporary paths.  Tags are kept separately for the UI to compare the
+    original file with each processed output.
+    """
+    ffprobe = check_ffprobe()
+    if not ffprobe:
+        return {
+            "available": False,
+            "error": "ffprobe não está disponível neste ambiente.",
+        }
+
+    result = subprocess.run(
+        [
+            ffprobe,
+            "-v",
+            "error",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+            "-show_chapters",
+            str(input_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or "ffprobe não conseguiu ler o arquivo.").strip()
+        raise ProcessingError(f"Não foi possível ler os metadados: {detail[-800:]}")
+
+    try:
+        data = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError as exc:
+        raise ProcessingError("ffprobe retornou dados inválidos de metadados.") from exc
+
+    source_format = data.get("format") or {}
+    format_info = {
+        key: source_format.get(key)
+        for key in ("format_name", "duration", "size", "bit_rate")
+        if source_format.get(key) is not None
+    }
+
+    def tags_of(value: dict) -> dict[str, str]:
+        tags = value.get("tags") or {}
+        return {str(key): str(item) for key, item in tags.items() if item is not None}
+
+    streams = []
+    for stream in data.get("streams") or []:
+        item = {
+            key: stream.get(key)
+            for key in (
+                "index",
+                "codec_type",
+                "codec_name",
+                "width",
+                "height",
+                "duration",
+                "sample_rate",
+                "channels",
+            )
+            if stream.get(key) is not None
+        }
+        stream_tags = tags_of(stream)
+        if stream_tags:
+            item["tags"] = stream_tags
+        streams.append(item)
+
+    chapters = []
+    for chapter in data.get("chapters") or []:
+        item = {
+            key: chapter.get(key)
+            for key in ("id", "start_time", "end_time")
+            if chapter.get(key) is not None
+        }
+        chapter_tags = tags_of(chapter)
+        if chapter_tags:
+            item["tags"] = chapter_tags
+        chapters.append(item)
+
+    return {
+        "available": True,
+        "format": format_info,
+        "tags": tags_of(source_format),
+        "streams": streams,
+        "chapters": chapters,
+    }
+
+
 def validate_input(input_path: Path) -> None:
     """Validate that the input file exists and has a supported extension."""
     if not input_path.exists():
