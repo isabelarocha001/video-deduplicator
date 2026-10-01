@@ -7,7 +7,6 @@ import os
 import shutil
 import sys
 import tempfile
-import time
 import traceback
 import uuid
 from pathlib import Path
@@ -80,8 +79,10 @@ def health():
         "build": "0.6.0",
         "ffmpeg": bool(shutil.which("ffmpeg")),
         "rendi": bool(os.environ.get("RENDI_API_KEY")),
-        "bunny": bool(
-            os.environ.get("BUNNY_STORAGE_ZONE") and os.environ.get("BUNNY_STORAGE_API_KEY")
+        "bunny": False,
+        "supabase_storage": bool(
+            os.environ.get("SUPABASE_URL")
+            and os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
         ),
         "supabase": bool(
             os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
@@ -126,10 +127,16 @@ async def process_entry(
     if action in ("process-and-publish", "process"):
         variations = 1
 
-    from vd.cdn import default_remote_path, delete_file, load_bunny_config, upload_file
     from vd.processor import process_video
     from vd.rendi import process_via_rendi
     from vd.supabase_media import register_media
+    from vd.supabase_storage import (
+        access_url,
+        default_storage_path,
+        delete_file,
+        load_supabase_storage_config,
+        upload_file,
+    )
     from vd.transforms import generate_variation_params
 
     hflip_b = _as_bool(hflip)
@@ -159,9 +166,9 @@ async def process_entry(
         )
 
     try:
-        cfg = load_bunny_config()
+        cfg = load_supabase_storage_config()
     except Exception as exc:
-        return _err(400, f"CDN config: {exc}")
+        return _err(400, f"Supabase Storage config: {exc}")
 
     if process_needed:
         params_list = generate_variation_params(
@@ -188,8 +195,9 @@ async def process_entry(
         src = await _save_upload(file, tmp / "in")
         in_url = None
         if use_rendi and process_needed:
-            in_remote = default_remote_path(src, prefix="rendi-in")
+            in_remote = default_storage_path(src, prefix="rendi-in")
             in_url = upload_file(src, in_remote, config=cfg)
+            in_url = access_url(in_remote, config=cfg)
 
         for p in params_list:
             label = p["label"]
@@ -200,7 +208,7 @@ async def process_entry(
                 if process_needed:
                     if use_rendi:
                         process_via_rendi(
-                            in_url.split("?")[0],
+                            in_url,
                             output_path=out,
                             subtle=True,
                             remove_metadata=remove_b,
@@ -234,16 +242,19 @@ async def process_entry(
                 else:
                     upload_src = src
 
-                remote = f"{cdn_prefix.rstrip('/')}/{upload_src.name}"
+                remote = default_storage_path(
+                    upload_src,
+                    prefix=cdn_prefix,
+                )
                 upload_file(upload_src, remote, config=cfg)
-                public = cfg.public_url(remote, cache_bust=str(int(time.time())))
+                public = access_url(remote, config=cfg)
                 item.update({"ok": True, "remote": remote, "public_url": public})
 
                 if register_b:
                     try:
                         row = register_media(
                             upload_src,
-                            public_url=public.split("?")[0],
+                            public_url=public,
                             storage_path=remote,
                             status="ready",
                             caption=(f"{caption} ({label})" if caption else label),
