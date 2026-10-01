@@ -19,6 +19,7 @@ if str(_ROOT) not in sys.path:
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="video-deduplicator", version="0.6.0")
 app.add_middleware(
@@ -313,3 +314,9 @@ async def process_entry(
         return result
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+# Vercel serves public/ automatically, but a local Uvicorn process does not.
+# Mount it last so the API routes above keep priority over static files.
+if PUBLIC.is_dir():
+    app.mount("/", StaticFiles(directory=str(PUBLIC), html=True), name="public")
