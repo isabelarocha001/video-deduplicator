@@ -30,13 +30,17 @@ _MODE_ALIASES = {
     "aggressive": "heavy",
     "agressivo": "heavy",
     "hard": "heavy",
+    "multi": "multi",
+    "contas": "multi",
+    "multi-contas": "multi",
+    "accounts": "multi",
 }
 
 
 def resolve_mode(mode: Optional[str], *, subtle: bool = False) -> str:
     m = (mode or "").strip().lower()
     m = _MODE_ALIASES.get(m, m)
-    if m in ("off", "light", "medium", "strong", "heavy"):
+    if m in ("off", "light", "medium", "strong", "heavy", "multi"):
         return m
     if subtle:
         return "light"
@@ -112,7 +116,9 @@ def build_transform_plan(
             t1 = 1.0
         spd = 1.02
         pitch = 1.02
-    elif mode == "heavy":
+    elif mode in ("heavy", "multi"):
+        # multi = same aggressive visual base as heavy; segments come from clip windows
+
         # Edição pesada — mudanças visíveis de propósito
         do_flip = True
         c_pct = 18.0
@@ -260,6 +266,7 @@ def generate_variation_params(
         "medium": dict(crop=(3.0, 7.0), trim=(0.5, 1.2), speed=(1.005, 1.02), flip_p=0.25),
         "strong": dict(crop=(8.0, 14.0), trim=(0.8, 1.8), speed=(1.01, 1.04), flip_p=0.85),
         "heavy": dict(crop=(14.0, 22.0), trim=(1.2, 2.5), speed=(1.03, 1.06), flip_p=0.95),
+        "multi": dict(crop=(14.0, 22.0), trim=(1.2, 2.5), speed=(1.03, 1.06), flip_p=0.95),
     }
     r = ranges.get(mode, ranges["strong"])
 
@@ -317,6 +324,70 @@ def generate_variation_params(
                 "trim_end": t1,
                 "speed": spd,
                 "label": f"v{i + 1}",
+                "index": i + 1,
+            }
+        )
+    return out
+
+
+
+def generate_multi_account_params(
+    n: int,
+    total_duration: float,
+    *,
+    seed: int = 42,
+    clip_duration: Optional[float] = None,
+    base_mode: str = "multi",
+) -> list[dict]:
+    """
+    N exports for posting the same master on different accounts.
+
+    Each variation:
+      - a *different time window* of the source (not the same middle with tiny trims)
+      - heavy visual jitter (crop/flip/speed)
+      - label conta1, conta2, ...
+
+    mute_audio is recommended by the caller (default on in UI/CLI for this mode).
+    """
+    import random
+
+    n = max(1, min(int(n), 10))
+    rng = random.Random(seed)
+    total = max(0.5, float(total_duration or 1.0))
+
+    # Default clip: ~55% of source, min 6s, max 20s (or full if shorter)
+    if clip_duration is not None and clip_duration > 0:
+        clip = min(float(clip_duration), total)
+    else:
+        clip = min(20.0, max(6.0, total * 0.55))
+        clip = min(clip, total)
+
+    max_start = max(0.0, total - clip)
+    out: list[dict] = []
+    for i in range(n):
+        if n == 1 or max_start <= 0.05:
+            start = 0.0
+        else:
+            # spread windows across the timeline + small jitter
+            start = (i / (n - 1)) * max_start
+            start = max(0.0, min(max_start, start + rng.uniform(-0.35, 0.35)))
+
+        # visual diversity on top of different segment
+        flip = True if i % 2 == 0 else rng.random() < 0.6
+        crop = round(rng.uniform(14.0, 22.0), 2)
+        spd = round(rng.uniform(1.03, 1.06), 4)
+
+        out.append(
+            {
+                "mode": "multi",
+                "hflip": flip,
+                "crop_percent": crop,
+                "trim_start": round(start, 3),
+                "trim_end": 0.0,  # unused when clip_duration is set
+                "clip_duration": round(clip, 3),
+                "speed": spd,
+                "mute_audio": True,
+                "label": f"conta{i + 1}",
                 "index": i + 1,
             }
         )

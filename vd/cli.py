@@ -69,8 +69,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--mode",
         type=str,
         default=None,
-        choices=["off", "light", "medium", "strong", "heavy", "pesado"],
-        help="Preset de microedições: off|light|medium|strong.",
+        choices=["off", "light", "medium", "strong", "heavy", "pesado", "multi", "contas"],
+        help="Preset: off|light|medium|strong|heavy|multi (multi-contas).",
+    )
+    process_parser.add_argument(
+        "--variations",
+        type=int,
+        default=1,
+        help="Quantas versões gerar (modo multi: uma por conta, max 10).",
     )
     process_parser.add_argument(
         "--hflip",
@@ -295,25 +301,59 @@ def main(argv: list[str] | None = None) -> int:
                     except Exception as _del_exc:
                         print(f"Aviso: não removeu rendi-in ({_del_exc})")
             else:
-                result = process_video(
-                    input_path=args.input,
-                    output_path=args.output,
-                    remove_metadata=args.remove_metadata,
-                    crop=args.crop,
-                    width=args.width,
-                    height=args.height,
-                    preserve_aspect=args.preserve_aspect,
-                    crf=args.crf,
-                    preset=args.preset,
-                    subtle=args.subtle,
-                    mode=getattr(args, "mode", None),
-                    hflip=getattr(args, "hflip", None) or None,
-                    crop_percent=getattr(args, "crop_percent", None),
-                    speed=getattr(args, "speed", None),
-                    mute_audio=getattr(args, "mute_audio", False),
-                    trim_start=args.trim_start,
-                    trim_end=args.trim_end,
-                )
+                mode = getattr(args, "mode", None)
+                n_var = max(1, min(int(getattr(args, "variations", 1) or 1), 10))
+                if mode in ("multi", "contas") and n_var >= 1:
+                    from vd.processor import get_duration_seconds
+                    from vd.transforms import generate_multi_account_params
+                    from pathlib import Path as _P
+                    dur = get_duration_seconds(args.input) or 30.0
+                    params = generate_multi_account_params(n_var, dur, seed=42)
+                    out_base = _P(args.output)
+                    for p in params:
+                        out_i = out_base.parent / f"{out_base.stem}_{p['label']}{out_base.suffix or '.mp4'}"
+                        process_video(
+                            input_path=args.input,
+                            output_path=out_i,
+                            remove_metadata=args.remove_metadata,
+                            crop=args.crop,
+                            width=args.width,
+                            height=args.height,
+                            preserve_aspect=args.preserve_aspect,
+                            crf=args.crf,
+                            preset=args.preset,
+                            subtle=True,
+                            mode="multi",
+                            hflip=p["hflip"],
+                            crop_percent=p["crop_percent"],
+                            speed=p["speed"],
+                            mute_audio=True,
+                            trim_start=p["trim_start"],
+                            trim_end=0,
+                            clip_duration=p.get("clip_duration"),
+                        )
+                        print(f"✓ {p['label']}: {out_i} (start={p['trim_start']}s, len={p.get('clip_duration')}s)")
+                    result = out_base.parent
+                else:
+                    result = process_video(
+                        input_path=args.input,
+                        output_path=args.output,
+                        remove_metadata=args.remove_metadata,
+                        crop=args.crop,
+                        width=args.width,
+                        height=args.height,
+                        preserve_aspect=args.preserve_aspect,
+                        crf=args.crf,
+                        preset=args.preset,
+                        subtle=args.subtle,
+                        mode=mode,
+                        hflip=getattr(args, "hflip", None) or None,
+                        crop_percent=getattr(args, "crop_percent", None),
+                        speed=getattr(args, "speed", None),
+                        mute_audio=getattr(args, "mute_audio", False),
+                        trim_start=args.trim_start,
+                        trim_end=args.trim_end,
+                    )
                 print(f"✓ Processamento concluído: {result}")
 
             if args.upload_cdn:

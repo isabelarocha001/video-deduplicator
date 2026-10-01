@@ -37,6 +37,7 @@
     medium: { hflip: false, crop: 5, trimStart: 0.8, trimEnd: 0.8, speed: 1.01 },
     strong: { hflip: true, crop: 10, trimStart: 1, trimEnd: 1, speed: 1.02 },
     heavy: { hflip: true, crop: 18, trimStart: 1.5, trimEnd: 1.5, speed: 1.04 },
+    multi: { hflip: true, crop: 18, trimStart: 0, trimEnd: 0, speed: 1.04 },
   };
 
   function applyPreset(mode) {
@@ -51,13 +52,19 @@
 
   document.querySelectorAll('input[name="mode"]').forEach((r) => {
     r.addEventListener("change", () => {
-      if (r.checked) applyPreset(r.value);
+      if (r.checked) {
+        applyPreset(r.value);
+        if (r.value === "multi") {
+          if ($("variations")) $("variations").value = "3";
+          if ($("muteAudio")) $("muteAudio").checked = true;
+        }
+      }
     });
   });
   cropPercent?.addEventListener("input", () => {
     if (cropVal) cropVal.textContent = cropPercent.value;
   });
-  applyPreset("heavy");
+  applyPreset("multi");
 
   function setStep(name, state) {
     steps?.querySelectorAll("li").forEach((li) => {
@@ -433,7 +440,7 @@
       return;
     }
     const mode =
-      document.querySelector('input[name="mode"]:checked')?.value || "heavy";
+      document.querySelector('input[name="mode"]:checked')?.value || "multi";
     let n = parseInt($("variations")?.value || "1", 10);
     if (isNaN(n) || n < 1) n = 1;
     if (n > 10) n = 10;

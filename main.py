@@ -193,7 +193,7 @@ async def process_entry(
     if action in ("process-and-publish", "process"):
         variations = 1
 
-    from vd.processor import process_video
+    from vd.processor import get_duration_seconds, process_video
     from vd.rendi import process_via_rendi
     from vd.supabase_media import register_media
     from vd.supabase_storage import (
@@ -203,7 +203,8 @@ async def process_entry(
         load_supabase_storage_config,
         upload_file,
     )
-    from vd.transforms import generate_variation_params
+    from vd.transforms import generate_multi_account_params, generate_variation_params
+    from vd.processor import get_duration_seconds
 
     hflip_b = _as_bool(hflip)
     mute_b = _as_bool(mute_audio) or False
@@ -237,16 +238,24 @@ async def process_entry(
         return _err(400, f"Supabase Storage config: {exc}")
 
     if process_needed:
-        params_list = generate_variation_params(
-            variations,
-            mode=mode,
-            base_hflip=hflip_b,
-            base_crop_percent=crop_percent,
-            base_trim_start=trim_start,
-            base_trim_end=trim_end,
-            base_speed=speed,
-            seed=seed,
-        )
+        if mode in ("multi", "contas", "accounts"):
+            dur = get_duration_seconds(src) or 30.0
+            params_list = generate_multi_account_params(
+                variations,
+                dur,
+                seed=seed,
+            )
+        else:
+            params_list = generate_variation_params(
+                variations,
+                mode=mode,
+                base_hflip=hflip_b,
+                base_crop_percent=crop_percent,
+                base_trim_start=trim_start,
+                base_trim_end=trim_end,
+                base_speed=speed,
+                seed=seed,
+            )
     else:
         params_list = [{
             "mode": "off", "hflip": False, "crop_percent": 0,
@@ -299,9 +308,10 @@ async def process_entry(
                             hflip=p["hflip"],
                             crop_percent=p["crop_percent"],
                             speed=p["speed"],
-                            mute_audio=mute_b,
+                            mute_audio=bool(p.get("mute_audio", mute_b)),
                             trim_start=p["trim_start"],
-                            trim_end=p["trim_end"],
+                            trim_end=p.get("trim_end") or 0,
+                            clip_duration=p.get("clip_duration"),
                             crf=crf,
                             preset=preset,
                         )

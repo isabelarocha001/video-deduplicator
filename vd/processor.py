@@ -196,6 +196,7 @@ def build_ffmpeg_args(
     mute_audio: bool = False,
     trim_start: Optional[float] = None,
     trim_end: Optional[float] = None,
+    clip_duration: Optional[float] = None,
     duration: Optional[float] = None,
 ) -> list[str]:
     """Build FFmpeg args with transform modes (light/medium/strong)."""
@@ -219,7 +220,9 @@ def build_ffmpeg_args(
 
     args.extend(["-i", str(input_path)])
 
-    if start > 0 or end_cut > 0:
+    if clip_duration is not None and clip_duration > 0:
+        args.extend(["-t", str(clip_duration)])
+    elif start > 0 or end_cut > 0:
         if duration is not None and duration > 0:
             out_len = duration - start - end_cut
             if out_len <= 0:
@@ -282,6 +285,7 @@ def process_video(
     mute_audio: bool = False,
     trim_start: Optional[float] = None,
     trim_end: Optional[float] = None,
+    clip_duration: Optional[float] = None,
 ) -> Path:
     """Process a video file with FFmpeg."""
     input_path = Path(input_path)
@@ -341,6 +345,7 @@ def process_video(
         mute_audio=mute_audio,
         trim_start=trim_start,
         trim_end=trim_end,
+        clip_duration=clip_duration,
         duration=duration,
     )
 
