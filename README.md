@@ -142,6 +142,12 @@ python -m vd.cli process \
 7. Usa `-movflags +faststart` para otimização de streaming.
 8. Gera o arquivo final em MP4.
 
+### Quais metadados são removidos?
+
+Com `--remove-metadata` (ativado por padrão), o processador usa `-map_metadata -1` para desativar a cópia dos metadados globais do contêiner original. Isso abrange tags globais como título, autor, descrição, software e datas quando presentes; informações de localização também são abrangidas quando estiverem armazenadas como tags globais.
+
+O novo MP4 ainda recebe os dados técnicos necessários do reencode, como codec, resolução, duração e encoder. Horários e outros atributos do arquivo no Windows não fazem parte do vídeo e não são alterados. Esta opção não promete remover toda tag específica de stream, capítulos ou dados técnicos gerados pelo próprio processamento.
+
 ### Formatos de entrada suportados
 
 `.mp4`, `.mkv`, `.avi`, `.mov`, `.webm`, `.flv`, `.wmv`, `.m4v`
