@@ -77,8 +77,9 @@
     .hint-mode { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 8px; }
     .metadata-spec { margin: 4px 0 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text-secondary); font-size: 0.8rem; line-height: 1.5; }
     .metadata-spec summary { cursor: pointer; color: var(--text); font-weight: 600; }
-    .metadata-spec p { margin: 8px 0 0; }
-    .metadata-spec p + p { margin-top: 6px; }
+    .metadata-spec ul { margin: 8px 0 0; padding-left: 20px; }
+    .metadata-spec li { margin: 3px 0; }
+    .metadata-spec p { margin: 10px 0 0; }
   </style>
 </head>
 <body>
@@ -118,8 +119,16 @@
           <p class="hint-mode">Sem áudio original — você adiciona trilha/trend na hora de postar (IG/TikTok).</p>
           <details class="metadata-spec">
             <summary>Quais metadados são removidos?</summary>
-            <p>Com a opção ativada, a ferramenta desativa a cópia dos metadados globais do contêiner original, como título, autor, descrição, software e datas quando estiverem gravados nessa camada. Informações de localização só entram nesse grupo quando forem tags globais.</p>
-            <p>O novo arquivo ainda recebe dados técnicos do reencode, como codec, resolução, duração e encoder. Horários do arquivo no Windows ficam fora do vídeo e não são alterados.</p>
+            <p>Com a opção ativada, estes metadados globais do arquivo original deixam de ser copiados:</p>
+            <ul>
+              <li>Título do vídeo</li>
+              <li>Autor ou criador</li>
+              <li>Descrição e comentários</li>
+              <li>Nome do software usado na origem</li>
+              <li>Datas gravadas como tags globais</li>
+              <li>Localização ou GPS, quando gravados como tags globais</li>
+            </ul>
+            <p>O novo MP4 ainda recebe dados técnicos do reencode, como codec, resolução, duração e encoder. Horários do arquivo no Windows e tags específicas de streams ou capítulos não são abrangidos por esta opção.</p>
           </details>
           <label class="row"><span>Crop % <em id="cropVal">10</em></span><input type="range" id="cropPercent" min="0" max="25" step="1" value="10" /></label>
           <label class="row"><span>Trim início (s)</span><input type="number" id="trimStart" min="0" step="0.1" value="1" /></label>
