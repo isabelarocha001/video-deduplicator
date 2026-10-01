@@ -173,7 +173,7 @@ async def process_entry(
     file: UploadFile = File(...),
     action: Optional[str] = Form("process-variations"),
     variations: int = Form(1),
-    mode: str = Form("strong"),
+    mode: str = Form("heavy"),
     hflip: Optional[str] = Form(None),
     crop_percent: Optional[float] = Form(None),
     speed: Optional[float] = Form(None),

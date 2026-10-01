@@ -69,7 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--mode",
         type=str,
         default=None,
-        choices=["off", "light", "medium", "strong"],
+        choices=["off", "light", "medium", "strong", "heavy", "pesado"],
         help="Preset de microedições: off|light|medium|strong.",
     )
     process_parser.add_argument(

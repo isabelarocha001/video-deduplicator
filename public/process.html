@@ -27,7 +27,7 @@
     }
     .upload-drop:hover, .upload-drop.is-drag { border-color: var(--accent); background: var(--bg-hover); }
     .upload-drop video, .upload-drop img { max-width: 100%; max-height: 220px; border-radius: 8px; margin-top: 8px; }
-    .modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
+    .modes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0; }
     .modes label {
       border: 1px solid var(--border); border-radius: 8px; padding: 10px 8px; text-align: center;
       cursor: pointer; font-size: 0.85rem;
@@ -113,7 +113,7 @@
   <main class="process-page">
     <a class="back-link" href="/">← Voltar ao feed</a>
     <h1>Processar e publicar</h1>
-    <p class="sub">Uma rota: microedições → Supabase Storage → registro. Use o modo <strong>Forte</strong> para republicação.</p>
+    <p class="sub">Uma rota: microedições → Supabase Storage → registro. Use o modo <strong>Pesado</strong> para edição agressiva (ainda sem garantia no TikTok/IG).</p>
 
     <div class="process-card">
       <form id="processForm">
@@ -138,8 +138,10 @@
         <div class="modes">
           <label><input type="radio" name="mode" value="light" /><span>Leve</span></label>
           <label><input type="radio" name="mode" value="medium" /><span>Médio</span></label>
-          <label><input type="radio" name="mode" value="strong" checked /><span>Forte</span></label>
+          <label><input type="radio" name="mode" value="strong" /><span>Forte</span></label>
+          <label><input type="radio" name="mode" value="heavy" checked /><span>Pesado</span></label>
         </div>
+        <p class="hint-mode">Pesado: flip + crop ~18% + zoom + rotação + cor forte + noise + trim 1,5s.</p>
 
         <div class="controls">
           <label class="row"><span>Espelhar (hflip)</span><input type="checkbox" id="hflip" checked /></label>

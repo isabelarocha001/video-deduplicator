@@ -2,9 +2,10 @@
 
 Modes:
   off     — only optional explicit crop/trim/metadata
-  light   — old subtle (1px, +1% color/volume)
+  light   — mild (crop ~0.5%, +2% color/volume)
   medium  — crop ~5%, mild color, trim defaults
   strong  — hflip, crop ~10%, stronger color, speed 1.02, audio pitch
+  heavy   — edição pesada: flip, crop 18%, zoom, rotate, grade forte, noise, trim longo
 """
 
 from __future__ import annotations
@@ -20,14 +21,22 @@ class TransformPlan:
     af: list[str]
     trim_start: float
     trim_end: float
-    # applied as output option -filter:a already in af; speed via setpts/atempo
     extra_input_args: list[str]
     notes: list[str]
 
 
+_MODE_ALIASES = {
+    "pesado": "heavy",
+    "aggressive": "heavy",
+    "agressivo": "heavy",
+    "hard": "heavy",
+}
+
+
 def resolve_mode(mode: Optional[str], *, subtle: bool = False) -> str:
     m = (mode or "").strip().lower()
-    if m in ("off", "light", "medium", "strong"):
+    m = _MODE_ALIASES.get(m, m)
+    if m in ("off", "light", "medium", "strong", "heavy"):
         return m
     if subtle:
         return "light"
@@ -48,8 +57,8 @@ def build_transform_plan(
     """
     Build video/audio filter lists.
 
-    crop_percent: percent of width/height to remove from each side total
-      e.g. 10 → keep center 90% (5% each side).
+    crop_percent: percent of frame removed total (center keep).
+      e.g. 10 → keep center 90%.
     """
     mode = resolve_mode(mode, subtle=subtle)
     notes: list[str] = [f"mode={mode}"]
@@ -57,19 +66,27 @@ def build_transform_plan(
     af: list[str] = []
     extra_in: list[str] = []
 
-    # defaults per mode
     do_flip = False
+    do_rotate = False
+    rotate_rad = 0.0
+    do_zoom = False
+    zoom = 1.0
+    do_unsharp = False
+    do_noise = False
+    do_vignette = False
     c_pct = 0.0
     contrast = 1.0
     saturation = 1.0
     brightness = 0.0
+    gamma = 1.0
     vol = 1.0
     spd = 1.0
+    pitch = 1.0
     t0 = float(trim_start or 0.0)
     t1 = float(trim_end or 0.0)
 
     if mode == "light":
-        c_pct = 0.5  # ~1px-ish relative via percent floor later handled as filters
+        c_pct = 0.5
         contrast, saturation, vol = 1.02, 1.02, 1.02
         if t0 <= 0 and trim_start is None:
             t0 = 0.3
@@ -94,6 +111,27 @@ def build_transform_plan(
         if t1 <= 0 and trim_end is None:
             t1 = 1.0
         spd = 1.02
+        pitch = 1.02
+    elif mode == "heavy":
+        # Edição pesada — mudanças visíveis de propósito
+        do_flip = True
+        c_pct = 18.0
+        do_zoom = True
+        zoom = 1.12
+        do_rotate = True
+        rotate_rad = 0.028  # ~1.6°
+        contrast, saturation, brightness = 1.14, 1.18, 0.04
+        gamma = 1.05
+        do_unsharp = True
+        do_noise = True
+        do_vignette = True
+        vol = 1.06
+        if t0 <= 0 and trim_start is None:
+            t0 = 1.5
+        if t1 <= 0 and trim_end is None:
+            t1 = 1.5
+        spd = 1.04
+        pitch = 1.05
 
     # user overrides
     if hflip is not None:
@@ -107,32 +145,62 @@ def build_transform_plan(
     if trim_end is not None:
         t1 = max(0.0, float(trim_end))
 
+    # --- filter chain order matters ---
+    if do_zoom and zoom > 1.001:
+        # scale up then center-crop back to even dims (visual reframe)
+        vf.append(f"scale=trunc(iw*{zoom}/2)*2:trunc(ih*{zoom}/2)*2")
+        vf.append("crop=trunc(iw/{z}/2)*2:trunc(ih/{z}/2)*2".format(z=zoom))
+        notes.append(f"zoom={zoom}")
+
     if explicit_crop:
         vf.append(f"crop={explicit_crop}")
         notes.append(f"crop={explicit_crop}")
     elif c_pct > 0:
-        # keep center (100 - c_pct)%
         keep = max(0.2, (100.0 - c_pct) / 100.0)
-        # even dimensions
         vf.append(f"crop=trunc(iw*{keep}/2)*2:trunc(ih*{keep}/2)*2")
         notes.append(f"crop_percent={c_pct}")
+
+    if do_rotate and abs(rotate_rad) > 1e-6:
+        # rotate + autocrop black borders from rotation
+        vf.append(f"rotate={rotate_rad}:c=none:ow=rotw({rotate_rad}):oh=roth({rotate_rad})")
+        vf.append("crop=trunc(iw*0.92/2)*2:trunc(ih*0.92/2)*2")
+        notes.append(f"rotate_rad={rotate_rad}")
 
     if do_flip:
         vf.append("hflip")
         notes.append("hflip")
 
-    if abs(contrast - 1.0) > 1e-6 or abs(saturation - 1.0) > 1e-6 or abs(brightness) > 1e-6:
+    if (
+        abs(contrast - 1.0) > 1e-6
+        or abs(saturation - 1.0) > 1e-6
+        or abs(brightness) > 1e-6
+        or abs(gamma - 1.0) > 1e-6
+    ):
         vf.append(
-            f"eq=contrast={contrast}:saturation={saturation}:brightness={brightness}"
+            f"eq=contrast={contrast}:saturation={saturation}:brightness={brightness}:gamma={gamma}"
         )
-        notes.append(f"eq=c{contrast}/s{saturation}/b{brightness}")
+        notes.append(f"eq=c{contrast}/s{saturation}/b{brightness}/g{gamma}")
 
-    # speed: video setpts + audio atempo (atempo range 0.5-2.0)
+    if do_unsharp:
+        vf.append("unsharp=5:5:0.8:5:5:0.4")
+        notes.append("unsharp")
+
+    if do_noise:
+        # light temporal noise — changes fingerprint without destroying quality
+        vf.append("noise=alls=4:allf=t+u")
+        notes.append("noise")
+
+    if do_vignette:
+        vf.append("vignette=PI/5")
+        notes.append("vignette")
+
+    # ensure even dimensions for libx264
+    vf.append("scale=trunc(iw/2)*2:trunc(ih/2)*2")
+
+    # speed: video setpts + audio atempo
     if abs(spd - 1.0) > 1e-4:
         vf.append(f"setpts=PTS/{spd}")
-        # chain atempo if needed
         a = spd
-        # atempo only 0.5-2.0
         while a > 2.0:
             af.append("atempo=2.0")
             a /= 2.0
@@ -146,10 +214,9 @@ def build_transform_plan(
         af.append(f"volume={vol}")
         notes.append(f"volume={vol}")
 
-    # mild pitch via asetrate+aresample only in strong if no explicit speed conflict
-    if mode == "strong" and abs(spd - 1.0) < 1e-4:
-        af.append("asetrate=44100*1.02,aresample=44100")
-        notes.append("pitch+2%")
+    if abs(pitch - 1.0) > 1e-4:
+        af.append(f"asetrate=44100*{pitch:.4f},aresample=44100")
+        notes.append(f"pitch={pitch}")
 
     if t0:
         notes.append(f"trim_start={t0}")
@@ -180,8 +247,6 @@ def generate_variation_params(
 ) -> list[dict]:
     """
     Build N slightly different param dicts for micro-variations of the same source.
-
-    Each item: {mode, hflip, crop_percent, trim_start, trim_end, speed, label}
     """
     import random
 
@@ -189,28 +254,26 @@ def generate_variation_params(
     rng = random.Random(seed)
     mode = resolve_mode(mode, subtle=False)
 
-    # ranges by mode
     ranges = {
         "off": dict(crop=(0, 0), trim=(0.0, 0.0), speed=(1.0, 1.0), flip_p=0.0),
         "light": dict(crop=(0.5, 2.0), trim=(0.2, 0.5), speed=(1.0, 1.01), flip_p=0.0),
         "medium": dict(crop=(3.0, 7.0), trim=(0.5, 1.2), speed=(1.005, 1.02), flip_p=0.25),
         "strong": dict(crop=(8.0, 14.0), trim=(0.8, 1.8), speed=(1.01, 1.04), flip_p=0.85),
+        "heavy": dict(crop=(14.0, 22.0), trim=(1.2, 2.5), speed=(1.03, 1.06), flip_p=0.95),
     }
     r = ranges.get(mode, ranges["strong"])
 
     out: list[dict] = []
     for i in range(n):
-        # alternate flip for diversity when not forced
         if base_hflip is not None:
             flip = bool(base_hflip)
-            # for variations after first, occasionally invert if n>1 and strong/medium
-            if i > 0 and mode in ("medium", "strong") and base_hflip is True:
-                flip = rng.random() < 0.7  # mostly keep flip
-            elif i > 0 and base_hflip is False and mode == "strong":
+            if i > 0 and mode in ("medium", "strong", "heavy") and base_hflip is True:
+                flip = rng.random() < 0.75
+            elif i > 0 and base_hflip is False and mode in ("strong", "heavy"):
                 flip = rng.random() < 0.5
         else:
             flip = rng.random() < r["flip_p"]
-            if i == 0 and mode == "strong":
+            if i == 0 and mode in ("strong", "heavy"):
                 flip = True
 
         crop = (
@@ -219,8 +282,8 @@ def generate_variation_params(
             else round(rng.uniform(*r["crop"]), 2)
         )
         if base_crop_percent is not None and i > 0:
-            # jitter ±2%
-            crop = max(0.0, min(25.0, float(base_crop_percent) + rng.uniform(-2.0, 2.0)))
+            jitter = 3.0 if mode == "heavy" else 2.0
+            crop = max(0.0, min(30.0, float(base_crop_percent) + rng.uniform(-jitter, jitter)))
 
         t0 = (
             float(base_trim_start)
@@ -233,9 +296,9 @@ def generate_variation_params(
             else round(rng.uniform(*r["trim"]), 2)
         )
         if base_trim_start is not None and i > 0:
-            t0 = max(0.0, float(base_trim_start) + rng.uniform(-0.3, 0.3))
+            t0 = max(0.0, float(base_trim_start) + rng.uniform(-0.4, 0.4))
         if base_trim_end is not None and i > 0:
-            t1 = max(0.0, float(base_trim_end) + rng.uniform(-0.3, 0.3))
+            t1 = max(0.0, float(base_trim_end) + rng.uniform(-0.4, 0.4))
 
         spd = (
             float(base_speed)
@@ -243,7 +306,7 @@ def generate_variation_params(
             else round(rng.uniform(*r["speed"]), 4)
         )
         if base_speed is not None and i > 0:
-            spd = round(max(0.9, min(1.1, float(base_speed) + rng.uniform(-0.015, 0.015))), 4)
+            spd = round(max(0.9, min(1.12, float(base_speed) + rng.uniform(-0.02, 0.02))), 4)
 
         out.append(
             {
