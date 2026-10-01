@@ -62,6 +62,17 @@
     .result-link { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .result-media-id { margin-top: 7px; color: var(--text-muted); font-size: 0.72rem; word-break: break-all; }
     @media (max-width: 420px) { .result-changes { grid-template-columns: 1fr; } }
+    .progress-panel { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+    .progress-panel[hidden] { display: none; }
+    .progress-top { display: flex; justify-content: space-between; gap: 12px; color: var(--text-secondary); font-size: 0.8rem; }
+    .progress-percent { color: var(--accent); font-weight: 600; }
+    .progress-track { height: 8px; margin-top: 8px; overflow: hidden; border-radius: 999px; background: var(--border); }
+    .progress-bar { width: 0; height: 100%; border-radius: inherit; background: var(--accent); transition: width 300ms ease; }
+    .progress-elapsed { margin-top: 6px; color: var(--text-muted); font-size: 0.72rem; }
+    .result-preview-wrap { position: relative; margin: 10px 0; overflow: hidden; border-radius: 8px; background: #000; }
+    .result-preview { display: block; width: 100%; max-height: min(62vh, 520px); object-fit: contain; background: #000; }
+    .preview-fullscreen { position: absolute; right: 8px; bottom: 8px; padding: 7px 10px; border: 1px solid rgba(255,255,255,.35); border-radius: 6px; background: rgba(0,0,0,.7); color: #fff; cursor: pointer; font-size: .75rem; }
+    .preview-fullscreen:hover { background: rgba(0,0,0,.9); }
     .back-link { display: inline-block; margin-bottom: 16px; color: var(--text-muted); font-size: 0.9rem; }
     .hint-mode { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 8px; }
   </style>
@@ -116,6 +127,17 @@
           <li data-step="cdn">3. Supabase Storage</li>
           <li data-step="db">4. Supabase</li>
         </ul>
+
+        <div class="progress-panel" id="progressPanel" hidden aria-live="polite">
+          <div class="progress-top">
+            <span id="progressMessage">Aguardando processamento…</span>
+            <span class="progress-percent" id="progressPercent">0%</span>
+          </div>
+          <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div class="progress-bar" id="progressBar"></div>
+          </div>
+          <div class="progress-elapsed" id="progressElapsed">Tempo decorrido: 0:00</div>
+        </div>
 
         <p class="form-error" id="error" hidden></p>
         <button type="submit" class="btn btn-primary btn-block" id="submit">Processar e publicar</button>

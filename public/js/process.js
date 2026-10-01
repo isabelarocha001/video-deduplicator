@@ -16,6 +16,15 @@
   const steps = $("steps");
   const cropPercent = $("cropPercent");
   const cropVal = $("cropVal");
+  const progressPanel = $("progressPanel");
+  const progressBar = $("progressBar");
+  const progressPercent = $("progressPercent");
+  const progressMessage = $("progressMessage");
+  const progressElapsed = $("progressElapsed");
+  const progressTrack = progressPanel?.querySelector('[role="progressbar"]');
+  let progressTimer = null;
+  let progressStartedAt = 0;
+  let progressValue = 0;
 
   const PRESETS = {
     light: { hflip: false, crop: 1, trimStart: 0.3, trimEnd: 0.3, speed: 1.0 },
@@ -60,6 +69,61 @@
     if (!errorEl) return;
     errorEl.hidden = !msg;
     errorEl.textContent = msg || "";
+  }
+
+  function formatElapsed(seconds) {
+    const total = Math.max(0, Math.floor(seconds));
+    const minutes = Math.floor(total / 60);
+    const rest = String(total % 60).padStart(2, "0");
+    return `${minutes}:${rest}`;
+  }
+
+  function setProgress(value, message) {
+    progressValue = Math.max(progressValue, Math.min(100, Math.round(value)));
+    if (progressBar) progressBar.style.width = `${progressValue}%`;
+    if (progressPercent) progressPercent.textContent = `${progressValue}%`;
+    if (progressMessage && message) progressMessage.textContent = message;
+    if (progressTrack) progressTrack.setAttribute("aria-valuenow", String(progressValue));
+    if (progressElapsed && progressStartedAt) {
+      progressElapsed.textContent = `Tempo decorrido: ${formatElapsed((Date.now() - progressStartedAt) / 1000)}`;
+    }
+  }
+
+  function startProgress(variations) {
+    if (progressTimer) window.clearInterval(progressTimer);
+    progressStartedAt = Date.now();
+    progressValue = 0;
+    if (progressPanel) progressPanel.hidden = false;
+    setProgress(5, `Enviando vídeo e preparando ${variations} variação${variations === 1 ? "" : "ões"}…`);
+    progressTimer = window.setInterval(() => {
+      const elapsed = (Date.now() - progressStartedAt) / 1000;
+      const estimated = Math.min(90, 8 + elapsed * 0.7);
+      const message = elapsed < 4
+        ? "Enviando vídeo…"
+        : "Aplicando microedições e salvando o resultado…";
+      setProgress(estimated, message);
+    }, 500);
+  }
+
+  function stopProgress(success, message) {
+    if (progressTimer) window.clearInterval(progressTimer);
+    progressTimer = null;
+    setProgress(100, message || (success ? "Processamento concluído." : "Processamento encerrado com erro."));
+  }
+
+  function attachFullscreenButtons() {
+    resultList?.querySelectorAll("[data-preview]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const video = document.getElementById(button.getAttribute("data-preview"));
+        if (!video) return;
+        try {
+          if (video.requestFullscreen) await video.requestFullscreen();
+          else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+        } catch (_) {
+          // Some mobile browsers only allow their native fullscreen control.
+        }
+      });
+    });
   }
 
   function escapeHtml(value) {
@@ -137,6 +201,9 @@
 
   function onFile(f) {
     showError("");
+    if (progressTimer) window.clearInterval(progressTimer);
+    progressTimer = null;
+    if (progressPanel) progressPanel.hidden = true;
     resultBox?.classList.remove("is-visible");
     if (hint) hint.hidden = true;
     if (previewVideo) {
@@ -178,6 +245,7 @@
     resultBox?.classList.remove("is-visible");
     if (resultSummary) resultSummary.textContent = "";
     if (resultList) resultList.innerHTML = "";
+    startProgress(n);
     if (submitBtn) {
       submitBtn.disabled = true;
       submitBtn.textContent = n > 1 ? `Gerando ${n} variações…` : "Processando…";
@@ -206,8 +274,6 @@
 
     setStep("upload", "done");
     setStep("process", "active");
-    setStep("cdn", "active");
-    setStep("db", "active");
 
     const endpoint = "/api/index";
 
@@ -226,6 +292,7 @@
       setStep("process", stepState);
       setStep("cdn", stepState);
       setStep("db", stepState);
+      stopProgress(okCount > 0, okCount > 0 ? "Processamento concluído." : "Nenhuma variação foi gerada.");
 
       resultBox?.classList.add("is-visible");
 
@@ -250,7 +317,7 @@
         }
         if (resultList) {
           resultList.innerHTML = data.items
-            .map((it) => {
+            .map((it, index) => {
               if (!it.ok) {
                 return `<div class="result-item is-failed">
                   <div class="result-item-title"><strong>${escapeHtml(it.label || "Variação")}</strong><span>Falhou</span></div>
@@ -261,6 +328,13 @@
               const link = url
                 ? `<a class="result-link" href="${escapeHtml(url)}" target="_blank" rel="noopener">Abrir vídeo processado</a>`
                 : "Link indisponível";
+              const previewId = `result-preview-${index}`;
+              const preview = url
+                ? `<div class="result-preview-wrap">
+                    <video class="result-preview" id="${previewId}" controls playsinline preload="metadata" src="${escapeHtml(url)}"></video>
+                    <button type="button" class="preview-fullscreen" data-preview="${previewId}">Tela cheia</button>
+                  </div>`
+                : "";
               const registration = it.media?.id
                 ? `<div class="result-media-id">Registrado no Supabase · id ${escapeHtml(it.media.id)}</div>`
                 : it.supabase_error
@@ -269,11 +343,13 @@
               return `<div class="result-item">
                 <div class="result-item-title"><strong>${escapeHtml(it.label || "Variação")}</strong><span>Gerada</span></div>
                 <div class="result-changes">${renderChanges(it)}</div>
+                ${preview}
                 ${link}
                 ${registration}
               </div>`;
             })
             .join("");
+          attachFullscreenButtons();
         }
       } else {
         const url = data.public_url || data.media?.public_url || "";
@@ -291,6 +367,7 @@
         if (resultSummary) resultSummary.textContent = url ? "1/1 concluída" : "Sem arquivo";
       }
     } catch (err) {
+      stopProgress(false, "Falha no processamento.");
       setStep("process", "fail");
       setStep("cdn", "fail");
       setStep("db", "fail");
