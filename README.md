@@ -157,6 +157,8 @@ O novo MP4 ainda recebe os dados técnicos necessários do reencode, como codec,
 
 Na interface, ao selecionar um vídeo, o endpoint `/api/inspect` lê e mostra os metadados atuais antes do processamento. Depois de cada variação concluída, a resposta inclui `metadata_after` e `metadata_removed_details`, permitindo conferir quais tags realmente deixaram de existir no arquivo gerado.
 
+A interface também faz uma verificação preventiva de QR Code em alguns quadros do vídeo usando a API nativa `BarcodeDetector` do navegador. Quando encontra um código, mostra um alerta para voltar ao arquivo original e exportar uma versão sem ele. A leitura é apenas um aviso e não altera nem oculta o conteúdo automaticamente.
+
 ### Formatos de entrada suportados
 
 `.mp4`, `.mkv`, `.avi`, `.mov`, `.webm`, `.flv`, `.wmv`, `.m4v`

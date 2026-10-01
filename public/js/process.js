@@ -15,6 +15,8 @@
   const resultList = $("resultList");
   const metadataPanel = $("metadataPanel");
   const metadataContent = $("metadataContent");
+  const qualityPanel = $("qualityPanel");
+  const qualityContent = $("qualityContent");
   const steps = $("steps");
   const cropPercent = $("cropPercent");
   const cropVal = $("cropVal");
@@ -28,6 +30,7 @@
   let progressStartedAt = 0;
   let progressValue = 0;
   let metadataRequestId = 0;
+  let qualityRequestId = 0;
 
   const PRESETS = {
     light: { hflip: false, crop: 1, trimStart: 0.3, trimEnd: 0.3, speed: 1.0 },
@@ -242,6 +245,107 @@
     }
   }
 
+  function waitForVideoEvent(video, eventName) {
+    return new Promise((resolve, reject) => {
+      const onEvent = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = () => {
+        cleanup();
+        reject(new Error("Não foi possível ler os quadros do vídeo."));
+      };
+      const cleanup = () => {
+        video.removeEventListener(eventName, onEvent);
+        video.removeEventListener("error", onError);
+      };
+      video.addEventListener(eventName, onEvent, { once: true });
+      video.addEventListener("error", onError, { once: true });
+    });
+  }
+
+  function seekVideo(video, time) {
+    return new Promise((resolve) => {
+      const target = Math.max(0, Math.min(Number(time) || 0, video.duration || 0));
+      if (Math.abs(video.currentTime - target) < 0.05) {
+        resolve();
+        return;
+      }
+      const onSeeked = () => {
+        video.removeEventListener("seeked", onSeeked);
+        resolve();
+      };
+      video.addEventListener("seeked", onSeeked, { once: true });
+      video.currentTime = target;
+    });
+  }
+
+  async function inspectQrCode(file) {
+    const requestId = ++qualityRequestId;
+    if (qualityPanel) qualityPanel.hidden = false;
+    if (qualityContent) qualityContent.innerHTML = `<p class="metadata-muted">Verificando alguns quadros em busca de QR Code…</p>`;
+
+    if (!file.type.startsWith("video/")) {
+      if (qualityContent) qualityContent.innerHTML = `<p class="metadata-muted">A verificação de QR Code está disponível para vídeos.</p>`;
+      return;
+    }
+    if (!("BarcodeDetector" in window)) {
+      if (qualityContent) qualityContent.innerHTML = `<p class="metadata-muted">Este navegador não oferece leitura automática de QR Code. Confira o vídeo original antes de publicar.</p>`;
+      return;
+    }
+
+    let detector;
+    try {
+      detector = new window.BarcodeDetector({ formats: ["qr_code"] });
+    } catch (_) {
+      if (qualityContent) qualityContent.innerHTML = `<p class="metadata-muted">A leitura automática de QR Code não está disponível neste navegador.</p>`;
+      return;
+    }
+
+    const video = document.createElement("video");
+    const objectUrl = URL.createObjectURL(file);
+    video.preload = "metadata";
+    video.muted = true;
+    video.playsInline = true;
+    video.src = objectUrl;
+    try {
+      await waitForVideoEvent(video, "loadedmetadata");
+      const canvas = document.createElement("canvas");
+      const maxDimension = 1280;
+      const scale = Math.min(1, maxDimension / Math.max(video.videoWidth, video.videoHeight));
+      canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+      canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      const duration = Number.isFinite(video.duration) ? video.duration : 0;
+      const sampleTimes = duration > 0
+        ? [0, duration * 0.25, duration * 0.5, duration * 0.75, Math.max(0, duration - 0.1)]
+        : [0];
+      let found = false;
+      for (const time of sampleTimes) {
+        await seekVideo(video, time);
+        if (!context) continue;
+        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const codes = await detector.detect(canvas);
+        if (codes && codes.length) {
+          found = true;
+          break;
+        }
+      }
+      if (requestId !== qualityRequestId) return;
+      if (qualityContent) {
+        qualityContent.innerHTML = found
+          ? `<p class="quality-warning">QR Code detectado em um dos quadros. Use o arquivo original sem QR Code ou remova-o no projeto antes de publicar.</p>`
+          : `<p class="quality-ok">Nenhum QR Code foi detectado nos quadros analisados. Isso não substitui uma conferência visual completa.</p>`;
+      }
+    } catch (err) {
+      if (requestId === qualityRequestId && qualityContent) {
+        qualityContent.innerHTML = `<p class="metadata-muted">Não foi possível verificar o QR Code automaticamente: ${escapeHtml(err.message || String(err))}</p>`;
+      }
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+  }
+
   function renderChanges(item) {
     const changes = item.changes || item.params || {};
     const rows = [
@@ -293,6 +397,8 @@
     if (progressPanel) progressPanel.hidden = true;
     if (metadataPanel) metadataPanel.hidden = false;
     if (metadataContent) metadataContent.innerHTML = `<p class="metadata-muted">Lendo os metadados do vídeo…</p>`;
+    if (qualityPanel) qualityPanel.hidden = false;
+    if (qualityContent) qualityContent.innerHTML = `<p class="metadata-muted">Preparando a verificação do vídeo…</p>`;
     resultBox?.classList.remove("is-visible");
     if (hint) hint.hidden = true;
     if (previewVideo) {
@@ -315,6 +421,7 @@
       hint.textContent = f.name;
     }
     inspectFileMetadata(f);
+    inspectQrCode(f);
   }
 
   form?.addEventListener("submit", async (e) => {

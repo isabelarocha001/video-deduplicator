@@ -93,6 +93,11 @@
     .metadata-removed li::before { content: "✓"; color: #2ecc71; margin-right: 3px; }
     .metadata-output { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
     .metadata-output summary { cursor: pointer; color: var(--text-secondary); }
+    .quality-panel { margin: 12px 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font-size: 0.8rem; }
+    .quality-panel[hidden] { display: none; }
+    .quality-panel h2 { margin: 0 0 8px; font-size: 0.9rem; }
+    .quality-warning { color: #f2c94c; }
+    .quality-ok { color: #2ecc71; }
   </style>
 </head>
 <body>
@@ -122,6 +127,11 @@
         <section class="metadata-panel" id="metadataPanel" hidden aria-live="polite">
           <h2>Metadados atuais do vídeo</h2>
           <div id="metadataContent"></div>
+        </section>
+
+        <section class="quality-panel" id="qualityPanel" hidden aria-live="polite">
+          <h2>Verificação antes do upload</h2>
+          <div id="qualityContent"></div>
         </section>
 
         <p class="hint-mode">Intensidade das microedições</p>
