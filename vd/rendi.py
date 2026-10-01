@@ -44,6 +44,7 @@ def _headers() -> dict[str, str]:
         "X-API-KEY": _api_key(),
         "Content-Type": "application/json",
         "Accept": "application/json",
+        "User-Agent": "video-deduplicator/0.6 (+https://antiduplicata.vercel.app)",
     }
 
 
