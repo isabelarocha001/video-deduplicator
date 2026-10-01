@@ -288,7 +288,7 @@ async def process_entry(
 
         ok_count = sum(1 for i in items if i.get("ok"))
         cleaned = False
-        if in_remote and ok_count > 0:
+        if in_remote:
             try:
                 delete_file(in_remote, config=cfg)
                 cleaned = True
