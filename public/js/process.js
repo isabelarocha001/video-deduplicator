@@ -111,7 +111,12 @@
   function stopProgress(success, message) {
     if (progressTimer) window.clearInterval(progressTimer);
     progressTimer = null;
-    setProgress(100, message || (success ? "Processamento concluído." : "Processamento encerrado com erro."));
+    if (success) {
+      // O resultado já chegou: não faça o usuário esperar a animação terminar.
+      if (progressPanel) progressPanel.hidden = true;
+      return;
+    }
+    setProgress(100, message || "Processamento encerrado com erro.");
   }
 
   function attachFullscreenButtons() {
