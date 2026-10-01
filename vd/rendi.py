@@ -93,7 +93,6 @@ def build_subtle_command(
         trim_start=trim_start,
         trim_end=trim_end,
         speed=speed,
-        mute_audio=mute_audio,
     )
     parts: list[str] = []
     if plan.trim_start and plan.trim_start > 0:
