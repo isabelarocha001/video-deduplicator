@@ -214,15 +214,18 @@
     try {
       const res = await fetch(endpoint, { method: "POST", body: fd });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.ok === false) {
+      const hasItems = Array.isArray(data.items);
+      if ((!res.ok || data.ok === false) && !hasItems) {
         const detail = data.error || data.message || data.type || ("HTTP " + res.status);
         const extra = data.traceback ? "\n" + data.traceback.slice(-400) : "";
         throw new Error(detail + extra);
       }
 
-      setStep("process", "done");
-      setStep("cdn", "done");
-      setStep("db", "done");
+      const okCount = hasItems ? data.items.filter((item) => item.ok).length : 1;
+      const stepState = okCount > 0 ? "done" : "fail";
+      setStep("process", stepState);
+      setStep("cdn", stepState);
+      setStep("db", stepState);
 
       resultBox?.classList.add("is-visible");
 
@@ -234,12 +237,16 @@
           resultSummary.textContent = `${ok}/${requested} concluída${ok === 1 ? "" : "s"}`;
         }
         if (resultUrl) {
-          resultUrl.textContent = failed
-            ? "Algumas variações falharam; confira os detalhes abaixo."
+          resultUrl.textContent = ok === 0
+            ? "Nenhuma versão foi gerada. O erro detalhado de cada tentativa está abaixo."
+            : failed
+              ? "Algumas variações falharam; confira os detalhes abaixo."
             : "Cada versão abaixo mostra exatamente as microedições aplicadas.";
         }
         if (resultId) {
-          resultId.textContent = `Modo ${data.mode || mode} · arquivos enviados para o Supabase Storage`;
+          resultId.textContent = ok === 0
+            ? `Modo ${data.mode || mode} · nenhum arquivo foi salvo`
+            : `Modo ${data.mode || mode} · arquivos enviados para o Supabase Storage`;
         }
         if (resultList) {
           resultList.innerHTML = data.items

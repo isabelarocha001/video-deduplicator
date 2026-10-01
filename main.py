@@ -295,7 +295,7 @@ async def process_entry(
             except Exception:
                 cleaned = False
 
-        return {
+        result = {
             "ok": ok_count > 0,
             "action": action,
             "build": "0.6.0",
@@ -307,5 +307,9 @@ async def process_entry(
             "public_url": items[0].get("public_url") if items and items[0].get("ok") else None,
             "media": items[0].get("media") if items and items[0].get("ok") else None,
         }
+        if ok_count == 0:
+            result["error"] = "Nenhuma variação foi processada. Veja o erro de cada item."
+            return JSONResponse(result, status_code=502)
+        return result
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
