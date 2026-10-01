@@ -64,6 +64,11 @@ def _request(
             return json.loads(raw)
     except urllib.error.HTTPError as e:
         err = e.read().decode("utf-8", errors="replace")[:800]
+        if e.code == 403 and "Sample mode" in err:
+            raise RendiError(
+                "A conta Rendi está em modo de amostra e não pode processar vídeos próprios. "
+                "Ative um plano em https://app.rendi.dev/plans para liberar este fluxo."
+            ) from e
         raise RendiError(f"Rendi HTTP {e.code}: {err}") from e
     except urllib.error.URLError as e:
         raise RendiError(f"Rendi network error: {e}") from e
