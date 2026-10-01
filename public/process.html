@@ -50,6 +50,18 @@
     }
     .result-box.is-visible { display: block; }
     .result-box a { color: var(--accent); }
+    .result-heading { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+    .result-heading strong { font-size: 1rem; }
+    .result-summary { color: #2ecc71; font-size: 0.8rem; font-weight: 600; }
+    .result-item { margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+    .result-item.is-failed { border-color: var(--danger); }
+    .result-item-title { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+    .result-item-title span { color: var(--text-muted); font-size: 0.75rem; }
+    .result-changes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px 12px; margin: 10px 0; color: var(--text-secondary); font-size: 0.78rem; word-break: normal; }
+    .result-change strong { color: var(--text); font-weight: 500; }
+    .result-link { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .result-media-id { margin-top: 7px; color: var(--text-muted); font-size: 0.72rem; word-break: break-all; }
+    @media (max-width: 420px) { .result-changes { grid-template-columns: 1fr; } }
     .back-link { display: inline-block; margin-bottom: 16px; color: var(--text-muted); font-size: 0.9rem; }
     .hint-mode { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 8px; }
   </style>
@@ -110,8 +122,11 @@
       </form>
 
       <div class="result-box" id="result">
-        <strong>Pronto</strong>
-        <div id="resultUrl"></div>
+        <div class="result-heading">
+          <strong>Resultados gerados</strong>
+          <span class="result-summary" id="resultSummary"></span>
+        </div>
+        <div id="resultUrl" style="margin-top:6px"></div>
         <div id="resultId" style="margin-top:6px;color:var(--text-muted)"></div>
         <div id="resultList" style="margin-top:12px"></div>
       </div>

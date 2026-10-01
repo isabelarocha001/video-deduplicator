@@ -248,7 +248,23 @@ async def process_entry(
                 )
                 upload_file(upload_src, remote, config=cfg)
                 public = access_url(remote, config=cfg)
-                item.update({"ok": True, "remote": remote, "public_url": public})
+                item.update(
+                    {
+                        "ok": True,
+                        "remote": remote,
+                        "public_url": public,
+                        "changes": {
+                            "mode": p.get("mode"),
+                            "crop_percent": p.get("crop_percent"),
+                            "hflip": p.get("hflip"),
+                            "trim_start": p.get("trim_start"),
+                            "trim_end": p.get("trim_end"),
+                            "speed": p.get("speed"),
+                            "audio_removed": bool(mute_b),
+                            "metadata_removed": bool(remove_b),
+                        },
+                    }
+                )
 
                 if register_b:
                     try:

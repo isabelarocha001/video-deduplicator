@@ -11,6 +11,7 @@
   const resultBox = $("result");
   const resultUrl = $("resultUrl");
   const resultId = $("resultId");
+  const resultSummary = $("resultSummary");
   const resultList = $("resultList");
   const steps = $("steps");
   const cropPercent = $("cropPercent");
@@ -59,6 +60,52 @@
     if (!errorEl) return;
     errorEl.hidden = !msg;
     errorEl.textContent = msg || "";
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#039;",
+    })[char]);
+  }
+
+  function numberPt(value, digits = 2) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "—";
+    return number.toLocaleString("pt-BR", { maximumFractionDigits: digits });
+  }
+
+  function yesNo(value) {
+    return value ? "Sim" : "Não";
+  }
+
+  function safeHttpUrl(value) {
+    try {
+      const url = new URL(String(value || ""), window.location.origin);
+      return /^https?:$/.test(url.protocol) ? url.href : "";
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function renderChanges(item) {
+    const changes = item.changes || item.params || {};
+    const rows = [
+      ["Modo", changes.mode || "—"],
+      ["Crop", `${numberPt(changes.crop_percent)}%`],
+      ["Espelhamento", yesNo(changes.hflip)],
+      ["Corte inicial", `${numberPt(changes.trim_start)} s`],
+      ["Corte final", `${numberPt(changes.trim_end)} s`],
+      ["Velocidade", `${numberPt(changes.speed, 4)}x`],
+      ["Áudio original", changes.audio_removed ? "Removido" : "Mantido"],
+      ["Metadados", changes.metadata_removed ? "Removidos" : "Mantidos"],
+    ];
+    return rows.map(([label, value]) =>
+      `<div class="result-change"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</div>`
+    ).join("");
   }
 
   drop?.addEventListener("click", () => fileInput?.click());
@@ -129,6 +176,7 @@
     showError("");
     resetSteps();
     resultBox?.classList.remove("is-visible");
+    if (resultSummary) resultSummary.textContent = "";
     if (resultList) resultList.innerHTML = "";
     if (submitBtn) {
       submitBtn.disabled = true;
@@ -180,24 +228,42 @@
 
       if (data.items && Array.isArray(data.items)) {
         const ok = data.variations_ok || data.items.filter((i) => i.ok).length;
-        if (resultUrl) {
-          resultUrl.textContent = `${ok} de ${data.variations_requested || n} variações geradas`;
+        const requested = data.variations_requested || n;
+        const failed = data.items.length - ok;
+        if (resultSummary) {
+          resultSummary.textContent = `${ok}/${requested} concluída${ok === 1 ? "" : "s"}`;
         }
-        if (resultId) resultId.textContent = "modo=" + (data.mode || mode);
+        if (resultUrl) {
+          resultUrl.textContent = failed
+            ? "Algumas variações falharam; confira os detalhes abaixo."
+            : "Cada versão abaixo mostra exatamente as microedições aplicadas.";
+        }
+        if (resultId) {
+          resultId.textContent = `Modo ${data.mode || mode} · arquivos enviados para o Supabase Storage`;
+        }
         if (resultList) {
           resultList.innerHTML = data.items
             .map((it) => {
               if (!it.ok) {
-                return `<div style="margin:8px 0;color:var(--danger)">${it.label}: ${it.error || "falhou"}</div>`;
+                return `<div class="result-item is-failed">
+                  <div class="result-item-title"><strong>${escapeHtml(it.label || "Variação")}</strong><span>Falhou</span></div>
+                  <div style="margin-top:8px;color:var(--danger)">${escapeHtml(it.error || "Não foi possível gerar esta versão.")}</div>
+                </div>`;
               }
-              const url = it.public_url || "";
-              const params = it.params
-                ? `crop ${it.params.crop_percent}% · flip ${it.params.hflip} · speed ${it.params.speed}`
-                : "";
-              return `<div style="margin:10px 0;padding:8px;border:1px solid var(--border);border-radius:8px">
-                <strong>${it.label}</strong> <span style="color:var(--text-muted);font-size:12px">${params}</span><br/>
-                <a href="${url}" target="_blank" rel="noopener">${url}</a>
-                ${it.media?.id ? `<div style="font-size:12px;color:var(--text-muted)">id ${it.media.id}</div>` : ""}
+              const url = safeHttpUrl(it.public_url);
+              const link = url
+                ? `<a class="result-link" href="${escapeHtml(url)}" target="_blank" rel="noopener">Abrir vídeo processado</a>`
+                : "Link indisponível";
+              const registration = it.media?.id
+                ? `<div class="result-media-id">Registrado no Supabase · id ${escapeHtml(it.media.id)}</div>`
+                : it.supabase_error
+                  ? `<div class="result-media-id">Vídeo salvo no Storage; registro no banco pendente: ${escapeHtml(it.supabase_error)}</div>`
+                  : "";
+              return `<div class="result-item">
+                <div class="result-item-title"><strong>${escapeHtml(it.label || "Variação")}</strong><span>Gerada</span></div>
+                <div class="result-changes">${renderChanges(it)}</div>
+                ${link}
+                ${registration}
               </div>`;
             })
             .join("");
@@ -205,15 +271,17 @@
       } else {
         const url = data.public_url || data.media?.public_url || "";
         if (resultUrl) {
-          resultUrl.innerHTML = url
-            ? 'URL: <a href="' + url + '" target="_blank" rel="noopener">' + url + "</a>"
-            : "Sem URL";
+          const safeUrl = safeHttpUrl(url);
+          resultUrl.innerHTML = safeUrl
+            ? '<a class="result-link" href="' + escapeHtml(safeUrl) + '" target="_blank" rel="noopener">Abrir vídeo processado</a>'
+            : "Link indisponível";
         }
         if (resultId) {
-          resultId.textContent =
-            (data.mode ? "modo=" + data.mode + " · " : "") +
-            (data.media?.id ? "id " + data.media.id : data.remote || "");
+          resultId.textContent = data.mode
+            ? `Modo ${data.mode} · arquivo enviado para o Supabase Storage`
+            : "Arquivo enviado para o Supabase Storage";
         }
+        if (resultSummary) resultSummary.textContent = url ? "1/1 concluída" : "Sem arquivo";
       }
     } catch (err) {
       setStep("process", "fail");
