@@ -1,4 +1,4 @@
-"""CLI entry point for the video processor."""
+"""CLI entry point — processamento local (vídeo e foto). Sem Supabase obrigatório."""
 
 from __future__ import annotations
 
@@ -7,30 +7,11 @@ import sys
 import time
 from pathlib import Path
 
-from vd.cdn import (
-    CdnConfigError,
-    CdnUploadError,
-    default_remote_path,
-    delete_file,
-    load_bunny_config,
-    upload_file,
-)
 from vd.processor import (
     FFmpegNotFoundError,
     InputValidationError,
     ProcessingError,
     process_video,
-)
-from vd.rendi import (
-    RendiConfigError,
-    RendiError,
-    is_configured as rendi_configured,
-    process_via_rendi,
-)
-from vd.supabase_media import (
-    SupabaseConfigError,
-    SupabaseMediaError,
-    register_media,
 )
 
 
@@ -38,364 +19,266 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m vd.cli",
         description=(
-            "Remover duplicidade de vídeo – processador/normalizador de vídeo "
-            "para conteúdo próprio. Utiliza FFmpeg como motor de processamento. "
-            "Suporta upload para Bunny CDN."
+            "Processador local de vídeo e foto. "
+            "Remove metadados + microedições. Saída em disco local."
         ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # ── process ──────────────────────────────────────────────────────────
-    process_parser = subparsers.add_parser(
-        "process",
-        help="Processa um vídeo (reencode, metadados, crop, resize, subtle, trim, CDN).",
+    # ── process (vídeo) ──────────────────────────────────────────────────
+    vp = subparsers.add_parser("process", help="Processa um vídeo (FFmpeg local).")
+    vp.add_argument("--input", "-i", required=True, type=Path)
+    vp.add_argument("--output", "-o", required=True, type=Path)
+    vp.add_argument("--remove-metadata", action="store_true", default=True)
+    vp.add_argument("--no-remove-metadata", action="store_false", dest="remove_metadata")
+    vp.add_argument("--crop", type=str, default=None)
+    vp.add_argument("--width", type=int, default=None)
+    vp.add_argument("--height", type=int, default=None)
+    vp.add_argument("--preserve-aspect", action="store_true", default=True)
+    vp.add_argument("--no-preserve-aspect", action="store_false", dest="preserve_aspect")
+    vp.add_argument("--crf", type=int, default=23)
+    vp.add_argument(
+        "--preset",
+        type=str,
+        default="medium",
+        choices=[
+            "ultrafast", "superfast", "veryfast", "faster", "fast",
+            "medium", "slow", "slower", "veryslow",
+        ],
     )
-    process_parser.add_argument("--input", "-i", required=True, type=Path, help="Arquivo de vídeo de entrada.")
-    process_parser.add_argument("--output", "-o", required=True, type=Path, help="Arquivo de saída (MP4).")
-    process_parser.add_argument("--remove-metadata", action="store_true", default=True, help="Remove metadados (padrão: ativado).")
-    process_parser.add_argument("--no-remove-metadata", action="store_false", dest="remove_metadata", help="Mantém metadados originais.")
-    process_parser.add_argument("--crop", type=str, default=None, help="Crop w:h:x:y.")
-    process_parser.add_argument("--width", type=int, default=None, help="Largura de saída.")
-    process_parser.add_argument("--height", type=int, default=None, help="Altura de saída.")
-    process_parser.add_argument("--preserve-aspect", action="store_true", default=True, help="Preserva proporção.")
-    process_parser.add_argument("--no-preserve-aspect", action="store_false", dest="preserve_aspect", help="Não preserva proporção.")
-    process_parser.add_argument("--crf", type=int, default=23, help="CRF libx264 (0-51).")
-    process_parser.add_argument(
-        "--preset", type=str, default="medium",
-        choices=["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"],
-        help="Preset libx264.",
-    )
-    process_parser.add_argument(
+    vp.add_argument(
         "--mode",
         type=str,
         default=None,
         choices=["off", "light", "medium", "strong", "heavy", "pesado", "multi", "contas"],
-        help="Preset: off|light|medium|strong|heavy|multi (multi-contas).",
     )
-    process_parser.add_argument(
-        "--variations",
-        type=int,
-        default=1,
-        help="Quantas versões gerar (modo multi: uma por conta, max 10).",
-    )
-    process_parser.add_argument(
-        "--hflip",
-        action="store_true",
-        default=False,
-        help="Espelhar horizontalmente.",
-    )
-    process_parser.add_argument(
-        "--crop-percent",
-        type=float,
-        default=None,
-        help="Percentual de crop nas bordas (ex.: 10).",
-    )
-    process_parser.add_argument(
-        "--speed",
-        type=float,
-        default=None,
-        help="Velocidade (ex.: 1.02).",
-    )
-    process_parser.add_argument(
-        "--mute-audio",
-        action="store_true",
-        default=False,
-        help="Remove a faixa de áudio do vídeo (-an).",
-    )
-    process_parser.add_argument(
-        "--subtle", action="store_true", default=False,
-        help="Ajustes mínimos (+1%% contraste/saturação, crop 1px, volume +1%%).",
-    )
-    process_parser.add_argument("--trim-start", type=float, default=None, metavar="SECS", help="Corta N segundos do início.")
-    process_parser.add_argument("--trim-end", type=float, default=None, metavar="SECS", help="Corta N segundos do final.")
-    process_parser.add_argument(
-        "--rendi",
-        action="store_true",
-        default=False,
-        help="Processa via Rendi.dev (FFmpeg na nuvem). Requer RENDI_API_KEY e input já em URL pública ou --upload-cdn antes.",
-    )
-    process_parser.add_argument(
-        "--rendi-input-url",
-        type=str,
-        default=None,
-        help="URL pública do vídeo de entrada para o Rendi (obrigatório com --rendi se não usar upload prévio).",
-    )
-    process_parser.add_argument(
-        "--upload-cdn",
-        action="store_true",
-        default=False,
-        help="Após processar, envia o arquivo para Bunny Storage e imprime a URL pública.",
-    )
-    process_parser.add_argument(
-        "--cdn-prefix",
-        type=str,
-        default="uploads",
-        help="Prefixo do path remoto no Storage (padrão: uploads).",
-    )
-    process_parser.add_argument(
-        "--cdn-remote-path",
-        type=str,
-        default=None,
-        help="Path remoto completo (sobrescreve --cdn-prefix/nome do arquivo).",
-    )
+    vp.add_argument("--variations", type=int, default=1)
+    vp.add_argument("--hflip", action="store_true", default=False)
+    vp.add_argument("--crop-percent", type=float, default=None)
+    vp.add_argument("--speed", type=float, default=None)
+    vp.add_argument("--mute-audio", action="store_true", default=False)
+    vp.add_argument("--subtle", action="store_true", default=False)
+    vp.add_argument("--trim-start", type=float, default=None, metavar="SECS")
+    vp.add_argument("--trim-end", type=float, default=None, metavar="SECS")
 
-
-    process_parser.add_argument(
-        "--register-supabase",
-        action="store_true",
-        default=False,
-        help="Após upload CDN, registra a mídia em vd_media (public_url) no Supabase.",
+    # ── process-image (uma foto) ─────────────────────────────────────────
+    ip = subparsers.add_parser(
+        "process-image",
+        help="Processa uma foto localmente (limpa metadados + microedições).",
     )
-    process_parser.add_argument(
-        "--caption",
+    ip.add_argument("--input", "-i", required=True, type=Path, help="Foto de entrada")
+    ip.add_argument(
+        "--output", "-o", type=Path, default=None,
+        help="Arquivo de saída (padrão: output/<nome>_clean.jpg)",
+    )
+    ip.add_argument(
+        "--mode",
         type=str,
-        default=None,
-        help="Caption opcional ao registrar no Supabase.",
+        default="light",
+        choices=["off", "light", "medium", "strong", "heavy"],
     )
+    ip.add_argument("--crop-percent", type=float, default=None)
+    ip.add_argument("--seed", type=int, default=42)
 
-    # ── upload-cdn ───────────────────────────────────────────────────────
-    upload_parser = subparsers.add_parser(
-        "upload-cdn",
-        help="Envia um arquivo local já processado para o Bunny Storage/CDN.",
+    # ── process-images (lote de fotos) ───────────────────────────────────
+    bp = subparsers.add_parser(
+        "process-images",
+        help="Processa várias fotos em lote (pasta ou lista de arquivos).",
     )
-    upload_parser.add_argument("--input", "-i", required=True, type=Path, help="Arquivo local.")
-    upload_parser.add_argument(
-        "--remote-path",
+    bp.add_argument(
+        "--input", "-i", required=True, type=Path,
+        help="Pasta com fotos OU um arquivo",
+    )
+    bp.add_argument(
+        "--output-dir", "-o", type=Path, default=Path("output"),
+        help="Pasta de saída (padrão: output/)",
+    )
+    bp.add_argument(
+        "--mode",
         type=str,
-        default=None,
-        help="Path remoto (padrão: uploads/<nome-do-arquivo>).",
+        default="light",
+        choices=["off", "light", "medium", "strong", "heavy"],
     )
-    upload_parser.add_argument(
-        "--cdn-prefix",
-        type=str,
-        default="uploads",
-        help="Prefixo se --remote-path não for informado.",
-    )
-
-
-    upload_parser.add_argument(
-        "--register-supabase",
-        action="store_true",
-        default=False,
-        help="Registra a mídia em vd_media no Supabase após o upload.",
-    )
-    upload_parser.add_argument(
-        "--caption",
-        type=str,
-        default=None,
-        help="Caption opcional ao registrar no Supabase.",
-    )
-
-    # ── cdn-config ───────────────────────────────────────────────────────
-    subparsers.add_parser(
-        "cdn-config",
-        help="Valida e mostra a configuração CDN atual (sem exibir secrets).",
-    )
+    bp.add_argument("--crop-percent", type=float, default=None)
+    bp.add_argument("--variations", type=int, default=1, help="Variações por foto (1-5)")
+    bp.add_argument("--seed", type=int, default=42)
 
     return parser
 
 
-def _do_upload(local: Path, remote: str) -> str:
-    cfg = load_bunny_config()
-    public = upload_file(local, remote, config=cfg)
-    bust = str(int(time.time()))
-    return cfg.public_url(remote, cache_bust=bust)
+def _cmd_process_video(args: argparse.Namespace) -> int:
+    mode = getattr(args, "mode", None)
+    n_var = max(1, min(int(getattr(args, "variations", 1) or 1), 10))
 
+    if mode in ("multi", "contas") and n_var >= 1:
+        from vd.processor import get_duration_seconds
+        from vd.transforms import generate_multi_account_params
 
-def _maybe_register(local: Path, remote: str, public_url: str, *, enabled: bool, caption: str | None) -> None:
-    if not enabled:
-        return
-    row = register_media(
-        local,
-        public_url=public_url.split("?")[0],
-        storage_path=remote,
-        status="ready",
-        caption=caption,
+        dur = get_duration_seconds(args.input) or 30.0
+        params = generate_multi_account_params(n_var, dur, seed=42)
+        out_base = Path(args.output)
+        for p in params:
+            out_i = out_base.parent / f"{out_base.stem}_{p['label']}{out_base.suffix or '.mp4'}"
+            process_video(
+                input_path=args.input,
+                output_path=out_i,
+                remove_metadata=args.remove_metadata,
+                crop=args.crop,
+                width=args.width,
+                height=args.height,
+                preserve_aspect=args.preserve_aspect,
+                crf=args.crf,
+                preset=args.preset,
+                subtle=True,
+                mode="multi",
+                hflip=p["hflip"],
+                crop_percent=p["crop_percent"],
+                speed=p["speed"],
+                mute_audio=True,
+                trim_start=p["trim_start"],
+                trim_end=0,
+                clip_duration=p.get("clip_duration"),
+            )
+            print(f"✓ {p['label']}: {out_i}")
+        print(f"✓ Concluído → {out_base.parent}")
+        return 0
+
+    result = process_video(
+        input_path=args.input,
+        output_path=args.output,
+        remove_metadata=args.remove_metadata,
+        crop=args.crop,
+        width=args.width,
+        height=args.height,
+        preserve_aspect=args.preserve_aspect,
+        crf=args.crf,
+        preset=args.preset,
+        subtle=args.subtle,
+        mode=mode,
+        hflip=getattr(args, "hflip", None) or None,
+        crop_percent=getattr(args, "crop_percent", None),
+        speed=getattr(args, "speed", None),
+        mute_audio=getattr(args, "mute_audio", False),
+        trim_start=args.trim_start,
+        trim_end=args.trim_end,
     )
-    print(f"✓ Registrado no Supabase vd_media")
-    print(f"  id         : {row.get('id')}")
-    print(f"  public_url : {row.get('public_url')}")
-    print(f"  status     : {row.get('status')}")
-    if row.get("_fingerprint_error"):
-        print(f"  fingerprint: aviso — {row['_fingerprint_error']}")
+    print(f"✓ Processamento concluído: {result}")
+    return 0
+
+
+def _cmd_process_image(args: argparse.Namespace) -> int:
+    from vd.image_processor import process_image, ImageValidationError, ImageProcessingError
+
+    inp = Path(args.input)
+    out = args.output
+    if out is None:
+        out = Path("output") / f"{inp.stem}_clean.jpg"
+
+    try:
+        result = process_image(
+            inp,
+            out,
+            mode=args.mode,
+            seed=args.seed,
+            crop_percent=args.crop_percent,
+        )
+        print(f"✓ Foto processada: {result.output_path}")
+        print(f"  modo: {result.mode}")
+        print(f"  mudanças: {result.changes}")
+        return 0
+    except (ImageValidationError, ImageProcessingError) as exc:
+        print(f"Erro: {exc}", file=sys.stderr)
+        return 1
+
+
+def _cmd_process_images(args: argparse.Namespace) -> int:
+    from vd.image_processor import (
+        process_image,
+        is_image_file,
+        generate_image_variations,
+        ImageValidationError,
+        ImageProcessingError,
+        SUPPORTED_IMAGE_EXT,
+    )
+
+    src = Path(args.input)
+    out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if src.is_file():
+        files = [src] if is_image_file(src) else []
+    elif src.is_dir():
+        files = sorted(
+            p for p in src.iterdir()
+            if p.is_file() and p.suffix.lower() in SUPPORTED_IMAGE_EXT
+        )
+    else:
+        print(f"Erro: caminho não encontrado: {src}", file=sys.stderr)
+        return 1
+
+    if not files:
+        print("Nenhuma imagem encontrada.", file=sys.stderr)
+        return 1
+
+    n_var = max(1, min(int(args.variations or 1), 5))
+    ok = 0
+    fail = 0
+
+    print(f"Processando {len(files)} foto(s), {n_var} variação(ões) cada → {out_dir}")
+
+    for idx, f in enumerate(files):
+        params = generate_image_variations(n_var, mode=args.mode, seed=args.seed + idx * 100)
+        if args.crop_percent is not None and params:
+            params[0]["crop_percent"] = float(args.crop_percent)
+
+        for p in params:
+            label = p["label"]
+            out = out_dir / f"{f.stem}_{label}.jpg"
+            try:
+                result = process_image(
+                    f,
+                    out,
+                    mode=p.get("mode", args.mode),
+                    seed=int(p.get("seed", args.seed)),
+                    crop_percent=p.get("crop_percent"),
+                    rotate_deg=p.get("rotate_deg"),
+                )
+                print(f"✓ {f.name} → {result.output_path.name}")
+                ok += 1
+            except (ImageValidationError, ImageProcessingError) as exc:
+                print(f"✗ {f.name}: {exc}", file=sys.stderr)
+                fail += 1
+            except Exception as exc:
+                print(f"✗ {f.name}: {exc}", file=sys.stderr)
+                fail += 1
+
+    print(f"\nConcluído: {ok} ok, {fail} erro(s). Saída em: {out_dir.resolve()}")
+    return 0 if fail == 0 else 1
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    if args.command == "cdn-config":
-        try:
-            cfg = load_bunny_config()
-            print("CDN configurado:")
-            print(f"  storage_zone : {cfg.storage_zone}")
-            print(f"  storage_host : {cfg.storage_host}")
-            print(f"  cdn_hostname : {cfg.cdn_hostname or '(vazio)'}")
-            print(f"  cdn_base_url : {cfg.cdn_base_url or '(vazio)'}")
-            print(f"  api_key      : ****{cfg.storage_api_key[-4:] if len(cfg.storage_api_key) >= 4 else '****'}")
-            try:
-                print(f"  public_base  : {cfg.public_base}")
-            except CdnConfigError as exc:
-                print(f"  public_base  : (incompleto) {exc}")
-            return 0
-        except CdnConfigError as exc:
-            print(f"Erro de configuração CDN: {exc}", file=sys.stderr)
-            return 1
-
-    if args.command == "upload-cdn":
-        try:
-            remote = args.remote_path or default_remote_path(args.input, prefix=args.cdn_prefix)
-            url = _do_upload(args.input, remote)
-            print(f"✓ Upload CDN concluído")
-            print(f"  remote : {remote}")
-            print(f"  url    : {url}")
-            _maybe_register(
-                args.input,
-                remote,
-                url,
-                enabled=getattr(args, "register_supabase", False),
-                caption=getattr(args, "caption", None),
-            )
-            return 0
-        except (CdnConfigError, CdnUploadError, SupabaseConfigError, SupabaseMediaError) as exc:
-            print(f"Erro CDN: {exc}", file=sys.stderr)
-            return 1
-        except Exception as exc:  # pragma: no cover
-            print(f"Erro inesperado: {exc}", file=sys.stderr)
-            return 1
-
-    if args.command == "process":
-        try:
-            if getattr(args, "rendi", False):
-                input_url = getattr(args, "rendi_input_url", None)
-                rendi_in_remote = None
-                # If no URL, upload original to CDN first to get public URL
-                if not input_url:
-                    rendi_in_remote = default_remote_path(args.input, prefix="rendi-in")
-                    input_url = _do_upload(args.input, rendi_in_remote)
-                    print(f"✓ Input no CDN para Rendi: {input_url}")
-                rendi_res = process_via_rendi(
-                    input_url.split("?")[0],
-                    output_path=args.output,
-                    subtle=args.subtle,
-                    remove_metadata=args.remove_metadata,
-                    mode=getattr(args, "mode", None),
-                    hflip=True if getattr(args, "hflip", False) else None,
-                    crop_percent=getattr(args, "crop_percent", None),
-                    speed=getattr(args, "speed", None),
-                    mute_audio=getattr(args, "mute_audio", False),
-                    trim_start=args.trim_start,
-                    trim_end=args.trim_end,
-                    crf=args.crf,
-                    preset=args.preset,
-                    download=True,
-                )
-                result = rendi_res.local_path or args.output
-                print(f"✓ Rendi OK command_id={rendi_res.command_id}")
-                print(f"  output_url: {rendi_res.output_url}")
-                print(f"✓ Processamento concluído: {result}")
-                if rendi_in_remote:
-                    try:
-                        delete_file(rendi_in_remote)
-                        print(f"✓ Original rendi-in removido do Bunny: {rendi_in_remote}")
-                    except Exception as _del_exc:
-                        print(f"Aviso: não removeu rendi-in ({_del_exc})")
-            else:
-                mode = getattr(args, "mode", None)
-                n_var = max(1, min(int(getattr(args, "variations", 1) or 1), 10))
-                if mode in ("multi", "contas") and n_var >= 1:
-                    from vd.processor import get_duration_seconds
-                    from vd.transforms import generate_multi_account_params
-                    from pathlib import Path as _P
-                    dur = get_duration_seconds(args.input) or 30.0
-                    params = generate_multi_account_params(n_var, dur, seed=42)
-                    out_base = _P(args.output)
-                    for p in params:
-                        out_i = out_base.parent / f"{out_base.stem}_{p['label']}{out_base.suffix or '.mp4'}"
-                        process_video(
-                            input_path=args.input,
-                            output_path=out_i,
-                            remove_metadata=args.remove_metadata,
-                            crop=args.crop,
-                            width=args.width,
-                            height=args.height,
-                            preserve_aspect=args.preserve_aspect,
-                            crf=args.crf,
-                            preset=args.preset,
-                            subtle=True,
-                            mode="multi",
-                            hflip=p["hflip"],
-                            crop_percent=p["crop_percent"],
-                            speed=p["speed"],
-                            mute_audio=True,
-                            trim_start=p["trim_start"],
-                            trim_end=0,
-                            clip_duration=p.get("clip_duration"),
-                        )
-                        print(f"✓ {p['label']}: {out_i} (start={p['trim_start']}s, len={p.get('clip_duration')}s)")
-                    result = out_base.parent
-                else:
-                    result = process_video(
-                        input_path=args.input,
-                        output_path=args.output,
-                        remove_metadata=args.remove_metadata,
-                        crop=args.crop,
-                        width=args.width,
-                        height=args.height,
-                        preserve_aspect=args.preserve_aspect,
-                        crf=args.crf,
-                        preset=args.preset,
-                        subtle=args.subtle,
-                        mode=mode,
-                        hflip=getattr(args, "hflip", None) or None,
-                        crop_percent=getattr(args, "crop_percent", None),
-                        speed=getattr(args, "speed", None),
-                        mute_audio=getattr(args, "mute_audio", False),
-                        trim_start=args.trim_start,
-                        trim_end=args.trim_end,
-                    )
-                print(f"✓ Processamento concluído: {result}")
-
-            if args.upload_cdn:
-                remote = args.cdn_remote_path or default_remote_path(
-                    Path(result), prefix=args.cdn_prefix
-                )
-                url = _do_upload(Path(result), remote)
-                print(f"✓ Upload CDN concluído")
-                print(f"  remote : {remote}")
-                print(f"  url    : {url}")
-                _maybe_register(
-                    Path(result),
-                    remote,
-                    url,
-                    enabled=getattr(args, "register_supabase", False),
-                    caption=getattr(args, "caption", None),
-                )
-            elif getattr(args, "register_supabase", False):
-                print(
-                    "Aviso: --register-supabase requer --upload-cdn (precisa de public_url).",
-                    file=sys.stderr,
-                )
-
-            return 0
-        except FFmpegNotFoundError as exc:
-            print(f"Erro: {exc}", file=sys.stderr)
-            return 1
-        except InputValidationError as exc:
-            print(f"Erro de validação: {exc}", file=sys.stderr)
-            return 1
-        except ProcessingError as exc:
-            print(f"Erro de processamento: {exc}", file=sys.stderr)
-            return 1
-        except (CdnConfigError, CdnUploadError) as exc:
-            print(f"Erro CDN: {exc}", file=sys.stderr)
-            return 1
-        except (SupabaseConfigError, SupabaseMediaError) as exc:
-            print(f"Erro Supabase: {exc}", file=sys.stderr)
-            return 1
-        except Exception as exc:  # pragma: no cover
-            print(f"Erro inesperado: {exc}", file=sys.stderr)
-            return 1
+    try:
+        if args.command == "process":
+            return _cmd_process_video(args)
+        if args.command == "process-image":
+            return _cmd_process_image(args)
+        if args.command == "process-images":
+            return _cmd_process_images(args)
+    except FFmpegNotFoundError as exc:
+        print(f"Erro: {exc}", file=sys.stderr)
+        return 1
+    except InputValidationError as exc:
+        print(f"Erro de validação: {exc}", file=sys.stderr)
+        return 1
+    except ProcessingError as exc:
+        print(f"Erro de processamento: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"Erro inesperado: {exc}", file=sys.stderr)
+        return 1
 
     parser.print_help()
     return 1
