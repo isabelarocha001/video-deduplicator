@@ -1,7 +1,11 @@
 """Processamento de fotos: remove metadados + microedições imperceptíveis.
 
 Separado do pipeline de vídeo. Usa Pillow.
-Re-salvar como JPEG remove a maioria dos metadados (EXIF, XMP, IPTC, C2PA).
+
+Limpeza agressiva:
+  1. Cópia pixel-only (descarta .info, EXIF, ICC do objeto PIL)
+  2. Microedições
+  3. Duplo re-encode JPEG sem exif/icc/xmp
 """
 
 from __future__ import annotations
@@ -12,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+from PIL import Image, ImageEnhance, ImageFilter
 
 
 SUPPORTED_IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".bmp", ".tif", ".tiff"}
@@ -48,24 +52,63 @@ def validate_image(path: Path) -> None:
         )
 
 
-def _load_rgb(path: Path) -> Image.Image:
+def _pixel_only_copy(img: Image.Image) -> Image.Image:
+    """Cria imagem nova só com pixels — descarta .info, EXIF, ICC, XMP do objeto PIL.
+
+    Qualquer metadado que o Pillow ainda estivesse carregando no objeto
+    original não sobrevive a esta cópia.
+    """
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    clean = Image.new("RGB", img.size)
+    clean.paste(img)
+    # Garante que o dict info está vazio
+    clean.info = {}
+    return clean
+
+
+def _load_rgb_clean(path: Path) -> Image.Image:
+    """Abre a imagem e já devolve cópia só de pixels (sem metadados no objeto)."""
     try:
         img = Image.open(path)
+        # Carrega os pixels para memória antes de fechar o arquivo
+        img.load()
     except Exception as exc:
         raise ImageProcessingError(f"Não foi possível abrir a imagem: {exc}") from exc
-    if img.mode not in ("RGB", "L"):
-        img = img.convert("RGB")
-    elif img.mode == "L":
-        img = img.convert("RGB")
-    return img
+
+    return _pixel_only_copy(img)
 
 
-def _save_clean_jpeg(img: Image.Image, path: Path, quality: int = 88) -> None:
-    """Salva JPEG sem metadados (re-encode limpa EXIF/XMP/IPTC/C2PA)."""
+def _save_clean_jpeg_aggressive(img: Image.Image, path: Path, quality: int = 88) -> None:
+    """Salva JPEG com limpeza máxima de metadados.
+
+    - Cópia pixel-only antes de salvar
+    - Nunca passa exif=, icc_profile=, xmp=
+    - Duplo encode: salva em buffer → reabre → salva no disco
+      (segundo passe elimina qualquer resíduo que o primeiro possa ter deixado)
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    rgb = img.convert("RGB")
-    # Não passar exif= nem icc_profile= → metadados não são copiados
-    rgb.save(
+
+    # 1ª passagem: pixels puros → buffer JPEG
+    pure = _pixel_only_copy(img)
+    buf = io.BytesIO()
+    pure.save(
+        buf,
+        format="JPEG",
+        quality=quality,
+        optimize=True,
+        progressive=True,
+        # explicitamente SEM exif, SEM icc_profile, SEM xmp
+    )
+    buf.seek(0)
+
+    # 2ª passagem: reabre o buffer e salva de novo no disco
+    # Garante que nada de APP0/APP1/APP2/APP13 residual sobrevive
+    second = Image.open(buf)
+    second.load()
+    final = _pixel_only_copy(second)
+
+    final.save(
         path,
         format="JPEG",
         quality=quality,
@@ -91,7 +134,6 @@ def _apply_micro_edits(
     notes: list[str] = [f"mode={mode}"]
     changes: dict[str, Any] = {"mode": mode}
 
-    # Presets por modo
     if mode == "off":
         c_pct = 0.0
         rot = 0.0
@@ -117,14 +159,12 @@ def _apply_micro_edits(
         noise = True
         quality_jitter = 8
     else:
-        # fallback light
         c_pct = 1.2
         rot = 0.4
         b_f, c_f, s_f = 1.02, 1.02, 1.02
         noise = False
         quality_jitter = 3
 
-    # Overrides do usuário
     if crop_percent is not None:
         c_pct = max(0.0, min(15.0, float(crop_percent)))
     if rotate_deg is not None:
@@ -138,7 +178,6 @@ def _apply_micro_edits(
     if add_noise:
         noise = True
 
-    # Pequena variação aleatória para não ficar idêntico entre runs
     c_pct = max(0.0, c_pct + rng.uniform(-0.3, 0.3))
     rot = rot * rng.choice([-1, 1]) + rng.uniform(-0.15, 0.15)
     b_f += rng.uniform(-0.01, 0.01)
@@ -159,10 +198,11 @@ def _apply_micro_edits(
         notes.append(f"crop={c_pct:.2f}%")
         changes["crop_percent"] = round(c_pct, 2)
 
-    # 2. Rotação leve + recorte das bordas pretas
+    # 2. Rotação leve + recorte das bordas
     if abs(rot) > 0.05:
-        out = out.rotate(rot, resample=Image.Resampling.BICUBIC, expand=False, fillcolor=(0, 0, 0))
-        # corta 1% das bordas para esconder cantos pretos da rotação
+        out = out.rotate(
+            rot, resample=Image.Resampling.BICUBIC, expand=False, fillcolor=(0, 0, 0)
+        )
         w, h = out.size
         m = max(1, int(min(w, h) * 0.01))
         out = out.crop((m, m, w - m, h - m))
@@ -183,23 +223,26 @@ def _apply_micro_edits(
         notes.append(f"saturation={s_f:.3f}")
         changes["saturation"] = round(s_f, 3)
 
-    # 4. Ruído muito leve (só em medium+)
+    # 4. Ruído muito leve (medium+)
     if noise:
-        # Adiciona ruído sutil via filtro + blend simples
         noisy = out.filter(ImageFilter.GaussianBlur(radius=0.4))
-        # misturar 3% de versão levemente desfocada + sharpen de volta
         out = Image.blend(out, noisy, alpha=0.04)
         out = out.filter(ImageFilter.UnsharpMask(radius=0.6, percent=40, threshold=2))
         notes.append("noise+unsharp")
         changes["noise"] = True
 
-    # Garante dimensões pares (bom para alguns pipelines)
+    # Dimensões pares
     w, h = out.size
     if w % 2 or h % 2:
         out = out.crop((0, 0, w - (w % 2), h - (h % 2)))
 
+    # Cópia final pixel-only depois das edições
+    out = _pixel_only_copy(out)
+
     changes["quality_jitter"] = quality_jitter
     changes["metadata_removed"] = True
+    changes["strip_method"] = "pixel_only + double_jpeg_reencode"
+    notes.append("strip=pixel_only+double_reencode")
 
     return out, changes, notes
 
@@ -218,21 +261,19 @@ def process_image(
     add_noise: bool = False,
     jpeg_quality: int = 88,
 ) -> ImageProcessResult:
-    """Processa uma foto: microedições + remove metadados ao re-salvar.
+    """Processa uma foto: microedições + limpeza agressiva de metadados.
 
-    Args:
-        input_path: foto original
-        output_path: destino (.jpg recomendado)
-        mode: off | light | medium | strong | heavy
-        seed: para variação controlada
-        jpeg_quality: qualidade base do JPEG (com jitter por modo)
+    Fluxo:
+      1. Abre e faz cópia só de pixels (joga fora EXIF/ICC/XMP do objeto)
+      2. Aplica microedições
+      3. Duplo re-encode JPEG sem nenhum metadado
     """
     input_path = Path(input_path)
     output_path = Path(output_path)
 
     validate_image(input_path)
 
-    img = _load_rgb(input_path)
+    img = _load_rgb_clean(input_path)
     out, changes, notes = _apply_micro_edits(
         img,
         mode=mode,
@@ -245,23 +286,25 @@ def process_image(
         add_noise=add_noise,
     )
 
-    # Qualidade com pequeno jitter (muda o bitstream)
     q = max(70, min(95, jpeg_quality + changes.get("quality_jitter", 0) - 4))
     changes["jpeg_quality"] = q
 
-    # Força extensão .jpg no output se não for imagem conhecida
+    # Sempre JPEG limpo no final (PNG/WebP opcionais só se pedido explicitamente)
     if output_path.suffix.lower() not in {".jpg", ".jpeg", ".png", ".webp"}:
         output_path = output_path.with_suffix(".jpg")
 
     try:
-        if output_path.suffix.lower() in {".png"}:
+        if output_path.suffix.lower() == ".png":
+            # PNG também em cópia limpa, sem info
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            out.save(output_path, format="PNG", optimize=True)
+            pure = _pixel_only_copy(out)
+            pure.save(output_path, format="PNG", optimize=True)
         elif output_path.suffix.lower() == ".webp":
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            out.save(output_path, format="WEBP", quality=q)
+            pure = _pixel_only_copy(out)
+            pure.save(output_path, format="WEBP", quality=q)
         else:
-            _save_clean_jpeg(out, output_path, quality=q)
+            _save_clean_jpeg_aggressive(out, output_path, quality=q)
     except Exception as exc:
         raise ImageProcessingError(f"Falha ao salvar imagem: {exc}") from exc
 
@@ -300,7 +343,9 @@ def generate_image_variations(
             {
                 "mode": mode,
                 "crop_percent": round(rng.uniform(*base["crop"]), 2),
-                "rotate_deg": round(rng.uniform(*base["rot"]) * rng.choice([-1, 1]), 2),
+                "rotate_deg": round(
+                    rng.uniform(*base["rot"]) * rng.choice([-1, 1]), 2
+                ),
                 "seed": seed + i * 17,
                 "label": f"v{i + 1}",
                 "index": i + 1,
