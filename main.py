@@ -21,7 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-app = FastAPI(title="video-deduplicator", version="0.7.0")
+app = FastAPI(title="video-deduplicator", version="0.8.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -45,7 +45,6 @@ def _as_bool(v: Any) -> Optional[bool]:
 
 
 def _probe_metadata_safe(path: Path) -> dict[str, Any]:
-    """Probe metadata without making processing fail when inspection is unavailable."""
     try:
         from vd.processor import probe_metadata
 
@@ -55,35 +54,28 @@ def _probe_metadata_safe(path: Path) -> dict[str, Any]:
 
 
 def _metadata_entries(snapshot: Optional[dict[str, Any]]) -> list[dict[str, str]]:
-    """Flatten global, stream and chapter tags for comparison and display."""
     if not snapshot or not snapshot.get("available"):
         return []
-
     entries: list[dict[str, str]] = []
-
     for key, value in (snapshot.get("tags") or {}).items():
         entries.append({"scope": "Contêiner", "key": str(key), "value": str(value)})
-
     for stream in snapshot.get("streams") or []:
         index = stream.get("index", "?")
         stream_type = stream.get("codec_type") or "stream"
         scope = f"Stream {index} ({stream_type})"
         for key, value in (stream.get("tags") or {}).items():
             entries.append({"scope": scope, "key": str(key), "value": str(value)})
-
     for chapter in snapshot.get("chapters") or []:
         chapter_id = chapter.get("id", "?")
         scope = f"Capítulo {chapter_id}"
         for key, value in (chapter.get("tags") or {}).items():
             entries.append({"scope": scope, "key": str(key), "value": str(value)})
-
     return entries
 
 
 def _removed_metadata(
     before: Optional[dict[str, Any]], after: Optional[dict[str, Any]]
 ) -> list[dict[str, str]]:
-    """Return source tags that are absent or changed in the processed output."""
     after_entries = {
         (entry["scope"], entry["key"]): entry["value"]
         for entry in _metadata_entries(after)
@@ -128,11 +120,11 @@ def health():
     return {
         "status": "healthy",
         "service": "video-deduplicator",
-        "build": "0.7.0",
+        "build": "0.8.0",
         "ffmpeg": bool(shutil.which("ffmpeg")),
         "rendi": bool(os.environ.get("RENDI_API_KEY")),
-        "bunny": False,
         "pillow": True,
+        "batch_images": True,
         "supabase_storage": bool(
             os.environ.get("SUPABASE_URL")
             and os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
@@ -151,13 +143,11 @@ def process_page():
 
 @app.post("/api/inspect")
 async def inspect_entry(file: UploadFile = File(...)):
-    """Inspect the uploaded file before processing, without storing it remotely."""
     tmp = Path(tempfile.mkdtemp(prefix="vd-inspect-"))
     try:
         src = await _save_upload(file, tmp / "in")
         metadata = _probe_metadata_safe(src)
         if not metadata.get("available"):
-            # Para imagens sem ffprobe útil, retorna ok com aviso
             from vd.image_processor import is_image_file
 
             if is_image_file(src):
@@ -172,6 +162,183 @@ async def inspect_entry(file: UploadFile = File(...)):
                 }
             return _err(503, metadata.get("error", "Não foi possível ler os metadados."))
         return {"ok": True, "metadata": metadata}
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _process_one_image(
+    src: Path,
+    *,
+    mode: str,
+    seed: int,
+    crop_percent: Optional[float],
+    cdn_prefix: str,
+    register_b: bool,
+    caption: Optional[str],
+    cfg: Any,
+    label: str = "v1",
+) -> dict[str, Any]:
+    """Processa uma única foto e faz upload. Retorna item dict."""
+    from vd.image_processor import process_image, ImageProcessingError, ImageValidationError
+    from vd.supabase_media import register_media
+    from vd.supabase_storage import access_url, default_storage_path, upload_file
+
+    item: dict[str, Any] = {
+        "label": label,
+        "source_name": src.name,
+        "ok": False,
+        "media_type": "image",
+    }
+    try:
+        out = src.parent.parent / "out" / f"{src.stem}_{label}.jpg"
+        out.parent.mkdir(parents=True, exist_ok=True)
+
+        result = process_image(
+            src,
+            out,
+            mode=mode,
+            seed=seed,
+            crop_percent=crop_percent,
+        )
+        upload_src = result.output_path
+        changes = dict(result.changes)
+        changes["notes"] = result.notes
+
+        source_metadata = _probe_metadata_safe(src)
+        output_metadata = _probe_metadata_safe(upload_src)
+
+        remote = default_storage_path(upload_src, prefix=cdn_prefix)
+        upload_file(upload_src, remote, config=cfg)
+        public = access_url(remote, config=cfg)
+
+        item.update(
+            {
+                "ok": True,
+                "remote": remote,
+                "public_url": public,
+                "changes": changes,
+                "metadata_after": output_metadata,
+                "metadata_removed_details": _removed_metadata(
+                    source_metadata, output_metadata
+                ),
+            }
+        )
+
+        if register_b:
+            try:
+                row = register_media(
+                    upload_src,
+                    public_url=public,
+                    storage_path=remote,
+                    status="ready",
+                    caption=(f"{caption} ({label})" if caption else label),
+                    metadata={
+                        "variation": label,
+                        "media_type": "image",
+                        "source_name": src.name,
+                    },
+                )
+                item["media"] = {
+                    "id": row.get("id"),
+                    "public_url": row.get("public_url"),
+                }
+            except Exception as exc:
+                item["supabase_error"] = str(exc)
+    except (ImageValidationError, ImageProcessingError) as exc:
+        item["error"] = str(exc)
+    except Exception as exc:
+        item["error"] = str(exc)
+    return item
+
+
+@app.post("/api/process-batch")
+async def process_batch(
+    files: list[UploadFile] = File(...),
+    mode: str = Form("light"),
+    crop_percent: Optional[float] = Form(None),
+    variations: int = Form(1),
+    cdn_prefix: str = Form("uploads"),
+    register_supabase: Optional[str] = Form("true"),
+    caption: Optional[str] = Form(None),
+    seed: int = Form(42),
+):
+    """Processa várias fotos de uma vez (lote).
+
+    Cada arquivo de imagem é limpo (metadados) + microeditado e enviado ao storage.
+    Máximo 30 arquivos por request.
+    """
+    from vd.image_processor import is_image_file, generate_image_variations
+    from vd.supabase_storage import load_supabase_storage_config
+
+    register_b = _as_bool(register_supabase)
+    if register_b is None:
+        register_b = True
+
+    try:
+        variations = max(1, min(int(variations or 1), 5))
+    except Exception:
+        variations = 1
+
+    if not files:
+        return _err(400, "Nenhum arquivo enviado.")
+
+    if len(files) > 30:
+        return _err(400, "Máximo de 30 arquivos por lote.")
+
+    try:
+        cfg = load_supabase_storage_config()
+    except Exception as exc:
+        return _err(400, f"Supabase Storage config: {exc}")
+
+    img_mode = mode if mode in ("off", "light", "medium", "strong", "heavy") else "light"
+
+    tmp = Path(tempfile.mkdtemp(prefix="vd-batch-"))
+    all_items: list[dict[str, Any]] = []
+    skipped: list[str] = []
+
+    try:
+        for idx, upload in enumerate(files):
+            src = await _save_upload(upload, tmp / "in" / str(idx))
+            if not is_image_file(src):
+                skipped.append(upload.filename or src.name)
+                continue
+
+            params_list = generate_image_variations(
+                variations, mode=img_mode, seed=seed + idx * 100
+            )
+            if crop_percent is not None and params_list:
+                params_list[0]["crop_percent"] = float(crop_percent)
+
+            for p in params_list:
+                item = _process_one_image(
+                    src,
+                    mode=p.get("mode", img_mode),
+                    seed=int(p.get("seed", seed)),
+                    crop_percent=p.get("crop_percent"),
+                    cdn_prefix=cdn_prefix,
+                    register_b=register_b,
+                    caption=caption,
+                    cfg=cfg,
+                    label=f"{Path(upload.filename or src.name).stem}_{p['label']}",
+                )
+                item["source_name"] = upload.filename or src.name
+                all_items.append(item)
+
+        ok_count = sum(1 for i in all_items if i.get("ok"))
+        return {
+            "ok": ok_count > 0,
+            "action": "process-batch",
+            "build": "0.8.0",
+            "media_type": "image",
+            "files_received": len(files),
+            "files_processed": len(files) - len(skipped),
+            "files_skipped": skipped,
+            "variations_per_file": variations,
+            "items_ok": ok_count,
+            "items_total": len(all_items),
+            "mode": img_mode,
+            "items": all_items,
+        }
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -256,9 +423,7 @@ async def process_entry(
         is_image = is_image_file(src)
         source_metadata = _probe_metadata_safe(src)
 
-        # ── FOTO ──────────────────────────────────────────────────────────
         if is_image:
-            # Fotos não precisam de FFmpeg
             img_mode = mode if mode in ("off", "light", "medium", "strong", "heavy") else "light"
             if mode in ("multi", "contas", "accounts"):
                 img_mode = "medium"
@@ -267,7 +432,6 @@ async def process_entry(
                 params_list = generate_image_variations(
                     variations, mode=img_mode, seed=seed
                 )
-                # Aplica crop_percent do formulário na primeira variação se vier
                 if crop_percent is not None and params_list:
                     params_list[0]["crop_percent"] = float(crop_percent)
             else:
@@ -283,78 +447,18 @@ async def process_entry(
                 ]
 
             for p in params_list:
-                label = p["label"]
-                out = tmp / "out" / f"{src.stem}_{label}.jpg"
-                out.parent.mkdir(parents=True, exist_ok=True)
-                item: dict[str, Any] = {
-                    "label": label,
-                    "params": p,
-                    "ok": False,
-                    "media_type": "image",
-                }
-                try:
-                    if process_needed:
-                        result = process_image(
-                            src,
-                            out,
-                            mode=p.get("mode", img_mode),
-                            seed=int(p.get("seed", seed)),
-                            crop_percent=p.get("crop_percent"),
-                            rotate_deg=p.get("rotate_deg"),
-                        )
-                        upload_src = result.output_path
-                        changes = dict(result.changes)
-                        changes["notes"] = result.notes
-                    else:
-                        upload_src = src
-                        changes = {"mode": "off", "metadata_removed": False}
-
-                    output_metadata = _probe_metadata_safe(upload_src)
-
-                    remote = default_storage_path(upload_src, prefix=cdn_prefix)
-                    upload_file(upload_src, remote, config=cfg)
-                    public = access_url(remote, config=cfg)
-
-                    item.update(
-                        {
-                            "ok": True,
-                            "remote": remote,
-                            "public_url": public,
-                            "changes": changes,
-                            "metadata_after": output_metadata,
-                            "metadata_removed_details": _removed_metadata(
-                                source_metadata, output_metadata
-                            ),
-                        }
-                    )
-
-                    if register_b:
-                        try:
-                            row = register_media(
-                                upload_src,
-                                public_url=public,
-                                storage_path=remote,
-                                status="ready",
-                                caption=(f"{caption} ({label})" if caption else label),
-                                metadata={
-                                    "variation": label,
-                                    "params": p,
-                                    "media_type": "image",
-                                },
-                            )
-                            item["media"] = {
-                                "id": row.get("id"),
-                                "public_url": row.get("public_url"),
-                            }
-                        except Exception as exc:
-                            item["supabase_error"] = str(exc)
-                except (ImageValidationError, ImageProcessingError) as exc:
-                    item["error"] = str(exc)
-                except Exception as exc:
-                    item["error"] = str(exc)
+                item = _process_one_image(
+                    src,
+                    mode=p.get("mode", img_mode),
+                    seed=int(p.get("seed", seed)),
+                    crop_percent=p.get("crop_percent"),
+                    cdn_prefix=cdn_prefix,
+                    register_b=register_b,
+                    caption=caption,
+                    cfg=cfg,
+                    label=p["label"],
+                )
                 items.append(item)
-
-        # ── VÍDEO ─────────────────────────────────────────────────────────
         else:
             if process_needed and not has_ffmpeg and not has_rendi:
                 return _err(
@@ -403,7 +507,7 @@ async def process_entry(
                 label = p["label"]
                 out = tmp / "out" / f"{src.stem}_{label}.mp4"
                 out.parent.mkdir(parents=True, exist_ok=True)
-                item = {
+                item: dict[str, Any] = {
                     "label": label,
                     "params": p,
                     "ok": False,
@@ -450,7 +554,6 @@ async def process_entry(
                         upload_src = src
 
                     output_metadata = _probe_metadata_safe(upload_src)
-
                     remote = default_storage_path(upload_src, prefix=cdn_prefix)
                     upload_file(upload_src, remote, config=cfg)
                     public = access_url(remote, config=cfg)
@@ -475,7 +578,6 @@ async def process_entry(
                             ),
                         }
                     )
-
                     if register_b:
                         try:
                             row = register_media(
@@ -512,7 +614,7 @@ async def process_entry(
         result = {
             "ok": ok_count > 0,
             "action": action,
-            "build": "0.7.0",
+            "build": "0.8.0",
             "media_type": "image" if is_image else "video",
             "variations_requested": variations,
             "variations_ok": ok_count,
@@ -531,6 +633,5 @@ async def process_entry(
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-# Vercel serves public/ automatically, but a local Uvicorn process does not.
 if PUBLIC.is_dir():
     app.mount("/", StaticFiles(directory=str(PUBLIC), html=True), name="public")
