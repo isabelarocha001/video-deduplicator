@@ -152,5 +152,111 @@
   </main>
 
   <script src="/js/process.js"></script>
+<section id="batchImageInspector" aria-labelledby="batchImageInspectorTitle" style="max-width:900px;margin:32px auto;padding:20px;border:1px solid #333;border-radius:12px;background:#111;color:#f5f5f5">
+  <h2 id="batchImageInspectorTitle">Analisar imagens processadas</h2>
+  <p>Selecione em lote as imagens da pasta output/ para conferir dimensões, formato, cor, metadados incorporados e indicadores visuais. A análise acontece neste navegador; os arquivos não são enviados.</p>
+  <label for="inspectorFiles">Imagens para analisar</label>
+  <input id="inspectorFiles" type="file" accept="image/*,.heic,.heif" multiple style="display:block;margin:10px 0 16px">
+  <button id="inspectImagesButton" type="button">Analisar imagens</button>
+  <button id="downloadImageReport" type="button" disabled>Baixar relatório CSV</button>
+  <p id="inspectorStatus" role="status" aria-live="polite"></p>
+  <div style="overflow:auto"><table id="imageInspectorResults" style="width:100%;border-collapse:collapse;font-size:14px">
+    <thead><tr><th>Arquivo</th><th>Formato / tamanho</th><th>Dimensões</th><th>Cor</th><th>Metadados</th><th>Luminosidade</th><th>Contraste</th><th>Nitidez*</th><th>Clipping</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <small>*Nitidez é uma estimativa técnica (variância do Laplaciano), não um julgamento definitivo da qualidade.</small>
+</section>
+<script>
+(() => {
+  const picker = document.getElementById('inspectorFiles');
+  const run = document.getElementById('inspectImagesButton');
+  const download = document.getElementById('downloadImageReport');
+  const status = document.getElementById('inspectorStatus');
+  const body = document.querySelector('#imageInspectorResults tbody');
+  if (!picker || !run || !body) return;
+  let report = [];
+
+  function metadata(file, bytes) {
+    const b = new Uint8Array(bytes), found = [];
+    const ascii = (start, len) => String.fromCharCode(...b.subarray(start, Math.min(start + len, b.length)));
+    if (b[0] === 0xff && b[1] === 0xd8) {
+      for (let p = 2; p + 4 < b.length;) {
+        if (b[p] !== 0xff) { p++; continue; }
+        const marker = b[p + 1]; if (marker === 0xd9 || marker === 0xda) break;
+        const len = (b[p + 2] << 8) | b[p + 3]; if (len < 2) break;
+        const tag = ascii(p + 4, Math.min(len - 2, 32));
+        if (marker === 0xe1 && tag.startsWith('Exif\0\0')) found.push('EXIF');
+        if (marker === 0xe1 && tag.includes('http://ns.adobe.com/xap/1.0/')) found.push('XMP');
+        if (marker === 0xe2 && tag.startsWith('ICC_PROFILE')) found.push('ICC');
+        p += 2 + len;
+      }
+    } else if (ascii(0, 8) === '\x89PNG\r\n\x1a\n') {
+      for (let p = 8; p + 12 <= b.length;) {
+        const len = ((b[p] * 0x1000000) + (b[p+1] << 16) + (b[p+2] << 8) + b[p+3]) >>> 0;
+        const type = ascii(p + 4, 4);
+        if (type === 'eXIf') found.push('EXIF');
+        if (type === 'iCCP') found.push('ICC');
+        if (['tEXt','zTXt','iTXt'].includes(type)) found.push('texto');
+        p += 12 + len; if (type === 'IEND' || p > b.length) break;
+      }
+    } else if (ascii(0, 4) === 'RIFF' && ascii(8, 4) === 'WEBP') {
+      for (let p = 12; p + 8 <= b.length;) {
+        const type = ascii(p, 4), len = (b[p+4] | (b[p+5] << 8) | (b[p+6] << 16) | (b[p+7] << 24)) >>> 0;
+        if (type === 'EXIF') found.push('EXIF'); if (type === 'XMP ') found.push('XMP'); if (type === 'ICCP') found.push('ICC');
+        p += 8 + len + (len & 1);
+      }
+    }
+    const known = (b[0] === 0xff && b[1] === 0xd8) || ascii(0, 8) === '\x89PNG\r\n\x1a\n' || (ascii(0, 4) === 'RIFF' && ascii(8, 4) === 'WEBP');
+    return [...new Set(found)].join(', ') || (known ? 'Nenhum detectado' : 'Formato sem leitura de metadados');
+  }
+
+  async function inspect(file) {
+    const buffer = await file.arrayBuffer();
+    const meta = metadata(file, buffer);
+    if (/\.heic$|\.heif$/i.test(file.name)) throw new Error('HEIC/HEIF não é decodificado por este navegador');
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image(); img.src = url; await img.decode();
+      const w = img.naturalWidth, h = img.naturalHeight, scale = Math.min(1, 640 / Math.max(w, h));
+      const cw = Math.max(1, Math.round(w * scale)), ch = Math.max(1, Math.round(h * scale));
+      const canvas = document.createElement('canvas'); canvas.width = cw; canvas.height = ch;
+      const ctx = canvas.getContext('2d', {willReadFrequently:true}); ctx.drawImage(img, 0, 0, cw, ch);
+      const px = ctx.getImageData(0, 0, cw, ch).data, lum = new Float32Array(cw * ch);
+      let sum = 0, sumSq = 0, dark = 0, bright = 0, alpha = 0;
+      for (let i=0,j=0;i<px.length;i+=4,j++) {
+        const y = .2126*px[i] + .7152*px[i+1] + .0722*px[i+2]; lum[j]=y; sum+=y; sumSq+=y*y;
+        if (y <= 5) dark++; if (y >= 250) bright++; if (px[i+3] < 255) alpha++;
+      }
+      let lapSum=0, lapSq=0, n=0;
+      for (let y=1;y<ch-1;y++) for (let x=1;x<cw-1;x++) {
+        const i=y*cw+x, v=4*lum[i]-lum[i-1]-lum[i+1]-lum[i-cw]-lum[i+cw]; lapSum+=v; lapSq+=v*v; n++;
+      }
+      const mean=sum/lum.length, contrast=Math.sqrt(Math.max(0,sumSq/lum.length-mean*mean));
+      const sharp=n ? Math.max(0,lapSq/n-(lapSum/n)**2) : 0;
+      return {name:file.name, format:file.type || file.name.split('.').pop().toUpperCase(), size:(file.size/1024).toFixed(1)+' KB', dimensions:`${w} × ${h}`, color:alpha?'RGBA/transparência':'RGB', metadata:meta, brightness:mean.toFixed(1)+'/255', contrast:contrast.toFixed(1), sharpness:sharp.toFixed(1), clipping:((dark+bright)*100/lum.length).toFixed(2)+'%', _sharp:sharp, _contrast:contrast};
+    } finally { URL.revokeObjectURL(url); }
+  }
+
+  run.addEventListener('click', async () => {
+    const files = [...picker.files]; if (!files.length) { status.textContent='Selecione imagens primeiro.'; return; }
+    run.disabled=true; download.disabled=true; body.replaceChildren(); report=[];
+    for (let i=0;i<files.length;i++) {
+      status.textContent=`Analisando ${i+1} de ${files.length}: ${files[i].name}`;
+      try { report.push(await inspect(files[i])); }
+      catch (e) { report.push({name:files[i].name, format:files[i].type||'—', size:(files[i].size/1024).toFixed(1)+' KB', dimensions:'—', color:'—', metadata:'—', brightness:'—', contrast:'—', sharpness:'—', clipping:e.message}); }
+      const r=report[report.length-1], tr=document.createElement('tr');
+      Object.values(r).slice(0,10).forEach(value=>{const td=document.createElement('td');td.textContent=value;td.style.cssText='padding:8px;border-top:1px solid #333;text-align:left;white-space:nowrap';tr.appendChild(td);}); body.appendChild(tr);
+    }
+    status.textContent=`Análise concluída: ${files.length} arquivo(s).`;
+    run.disabled=false; download.disabled=!report.length;
+  });
+  download.addEventListener('click', () => {
+    if (!report.length) return;
+    const keys=['name','format','size','dimensions','color','metadata','brightness','contrast','sharpness','clipping'];
+    const csv=[keys.join(';'),...report.map(r=>keys.map(k=>'"'+String(r[k]??'').replaceAll('"','""')+'"').join(';'))].join('\r\n');
+    const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));a.download='relatorio-imagens.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  });
+})();
+</script>
 </body>
 </html>
